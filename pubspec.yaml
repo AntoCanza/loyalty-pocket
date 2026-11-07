@@ -1,7 +1,7 @@
 name: loyalty_pocket
 description: An offline loyalty-card wallet for Android and iOS.
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ^3.9.0
@@ -9,6 +9,8 @@ environment:
 
 dependencies:
   flutter:
+    sdk: flutter
+  flutter_localizations:
     sdk: flutter
   barcode_widget: ^2.0.4
   file_selector: ^1.0.4
@@ -23,4 +25,5 @@ dev_dependencies:
   flutter_lints: ^5.0.0
 
 flutter:
+  generate: true
   uses-material-design: true

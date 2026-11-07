@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'card_pages.dart';
 import 'card_store.dart';
+import 'l10n/app_localizations.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,6 +27,8 @@ class LoyaltyPocketApp extends StatelessWidget {
     return MaterialApp(
       title: 'Loyalty Pocket',
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: _ink),
         scaffoldBackgroundColor: _canvas,
@@ -41,6 +44,8 @@ class LoyaltyPocketApp extends StatelessWidget {
     );
   }
 }
+
+enum _ImportKind { file, photos }
 
 class _WalletPage extends StatefulWidget {
   const _WalletPage();
@@ -86,52 +91,75 @@ class _WalletPageState extends State<_WalletPage> {
         final result = await ImagePicker().retrieveLostData();
         final files = result.files;
         if (mounted && files != null && files.isNotEmpty) {
-          await _addCard(photo: files.first);
+          await _reviewPhotos(files);
         } else if (result.exception != null) {
-          _notice('The interrupted photo capture could not be restored.');
+          _notice((l10n) => l10n.photoRecoveryFailed);
         }
       } catch (_) {
-        _notice('The interrupted photo capture could not be restored.');
+        _notice((l10n) => l10n.photoRecoveryFailed);
       }
     }
   }
 
-  void _notice(String message) {
+  void _notice(String Function(AppLocalizations) message) {
     if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ).showSnackBar(SnackBar(content: Text(message(l10n))));
   }
 
-  Future<void> _addCard({XFile? photo}) async {
+  Future<bool> _addCard({XFile? photo}) async {
     final store = await _store;
-    if (!mounted) return;
+    if (!mounted) return false;
     final card = await Navigator.of(context).push<LoyaltyCard>(
       MaterialPageRoute(
         builder: (_) => EditCardPage(store: store, recoveredPhoto: photo),
       ),
     );
     if (card != null && mounted) await _load();
+    return card != null;
+  }
+
+  Future<void> _reviewPhotos(List<XFile> photos) async {
+    for (final photo in photos) {
+      if (!mounted || !await _addCard(photo: photo)) break;
+    }
+  }
+
+  Future<void> _importPhotos() async {
+    setState(() => _importing = true);
+    try {
+      final photos = await ImagePicker().pickMultiImage(
+        requestFullMetadata: false,
+      );
+      await _reviewPhotos(photos);
+    } catch (_) {
+      _notice((l10n) => l10n.photoImportFailed);
+    } finally {
+      if (mounted) setState(() => _importing = false);
+    }
   }
 
   Future<void> _importCard() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _importing = true);
     try {
-      const json = XTypeGroup(
-        label: 'Loyalty Pocket card',
-        extensions: ['json'],
-        mimeTypes: ['application/json'],
-        uniformTypeIdentifiers: ['public.json'],
+      final json = XTypeGroup(
+        label: l10n.cardFileType,
+        extensions: const ['json'],
+        mimeTypes: const ['application/json'],
+        uniformTypeIdentifiers: const ['public.json'],
       );
       final file = await openFile(acceptedTypeGroups: [json]);
       if (file == null || !mounted) return;
       await (await _store).importCard(file.openRead());
       await _load();
-      _notice('Card imported.');
-    } on FormatException catch (error) {
-      _notice(error.message);
+      _notice((l10n) => l10n.cardImported);
+    } on FormatException {
+      _notice((l10n) => l10n.invalidCardFile);
     } catch (_) {
-      _notice('Could not open the card file. Please try again.');
+      _notice((l10n) => l10n.cardFileOpenFailed);
     } finally {
       if (mounted) setState(() => _importing = false);
     }
@@ -150,6 +178,7 @@ class _WalletPageState extends State<_WalletPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final cards = _cards;
     final ready = cards != null && !_loadFailed && !_importing;
     final count = cards?.length ?? 0;
@@ -161,10 +190,28 @@ class _WalletPageState extends State<_WalletPage> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Import shared card',
+          PopupMenuButton<_ImportKind>(
+            tooltip: l10n.importCards,
             icon: const Icon(Icons.file_download_outlined),
-            onPressed: ready ? _importCard : null,
+            enabled: ready,
+            onSelected: (kind) {
+              switch (kind) {
+                case _ImportKind.file:
+                  _importCard();
+                case _ImportKind.photos:
+                  _importPhotos();
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: _ImportKind.file,
+                child: Text(l10n.importSharedCard),
+              ),
+              PopupMenuItem(
+                value: _ImportKind.photos,
+                child: Text(l10n.importCardPhotos),
+              ),
+            ],
           ),
           const SizedBox(width: 8),
         ],
@@ -193,7 +240,7 @@ class _WalletPageState extends State<_WalletPage> {
                   ),
                   const SizedBox(height: 20),
                   Text(
-                    'Your card wallet',
+                    l10n.walletTitle,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w800,
@@ -201,7 +248,7 @@ class _WalletPageState extends State<_WalletPage> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '$count ${count == 1 ? 'card' : 'cards'} stored on this device',
+                    l10n.walletCardCount(count),
                     style: const TextStyle(color: _mint),
                   ),
                 ],
@@ -209,7 +256,7 @@ class _WalletPageState extends State<_WalletPage> {
             ),
             const SizedBox(height: 28),
             Text(
-              'Saved cards',
+              l10n.savedCards,
               style: Theme.of(
                 context,
               ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
@@ -217,13 +264,13 @@ class _WalletPageState extends State<_WalletPage> {
             const SizedBox(height: 12),
             if (_loadFailed)
               ListTile(
-                title: const Text('Could not load your wallet'),
+                title: Text(l10n.walletLoadFailed),
                 trailing: TextButton(
                   onPressed: () {
                     _store = _openStore();
                     _load(recoverPhoto: Platform.isAndroid);
                   },
-                  child: const Text('Retry'),
+                  child: Text(l10n.retry),
                 ),
               )
             else if (cards == null || _importing)
@@ -237,19 +284,21 @@ class _WalletPageState extends State<_WalletPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'No cards yet',
+                        l10n.noCards,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 4),
-                      const Text(
-                        'Take a photo of a loyalty card or import a card '
-                        'someone shared with you.',
-                      ),
+                      Text(l10n.emptyWallet),
                       const SizedBox(height: 6),
                       TextButton.icon(
                         onPressed: _importCard,
                         icon: const Icon(Icons.file_download_outlined),
-                        label: const Text('Import shared card'),
+                        label: Text(l10n.importSharedCard),
+                      ),
+                      TextButton.icon(
+                        onPressed: _importPhotos,
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: Text(l10n.importCardPhotos),
                       ),
                     ],
                   ),
@@ -275,7 +324,10 @@ class _WalletPageState extends State<_WalletPage> {
                       ),
                     ),
                     title: Text(card.name),
-                    subtitle: Text(card.format?.label ?? 'Original photo'),
+                    subtitle: Text(
+                      card.format?.localizedLabel(l10n) ??
+                          l10n.cardOriginalPhoto,
+                    ),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => _openCard(card),
                   ),
@@ -286,7 +338,7 @@ class _WalletPageState extends State<_WalletPage> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: ready ? _addCard : null,
         icon: const Icon(Icons.add),
-        label: const Text('Add card'),
+        label: Text(l10n.addCard),
       ),
     );
   }

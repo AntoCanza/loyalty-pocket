@@ -9,8 +9,17 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'card_store.dart';
+import 'l10n/app_localizations.dart';
 
 typedef _ScannedCode = ({String value, CardCodeFormat format});
+
+extension CardCodeFormatLocalization on CardCodeFormat {
+  String localizedLabel(AppLocalizations l10n) => switch (this) {
+    CardCodeFormat.qr => l10n.cardFormatQr,
+    CardCodeFormat.dataMatrix => l10n.cardFormatDataMatrix,
+    _ => label,
+  };
+}
 
 extension on CardCodeFormat {
   static final _codabarWithGuards = RegExp(r'^[ABCDENT*].+[ABCDENT*]$');
@@ -78,6 +87,8 @@ Set<_ScannedCode> _readCodes(BarcodeCapture capture) {
   return codes;
 }
 
+enum _PhotoHint { looking, none, found, several, enter }
+
 class EditCardPage extends StatefulWidget {
   const EditCardPage({
     super.key,
@@ -102,7 +113,7 @@ class _EditCardPageState extends State<EditCardPage> {
   late CardCodeFormat _format = widget.card?.format ?? CardCodeFormat.code128;
   File? _photo;
   bool _working = false;
-  String? _photoHint;
+  _PhotoHint? _photoHint;
 
   @override
   void initState() {
@@ -120,8 +131,9 @@ class _EditCardPageState extends State<EditCardPage> {
     super.dispose();
   }
 
-  void _notice(String text) {
+  void _notice(String Function(AppLocalizations) message) {
     if (!mounted) return;
+    final text = message(AppLocalizations.of(context)!);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
@@ -130,13 +142,13 @@ class _EditCardPageState extends State<EditCardPage> {
     MobileScannerController? scanner;
     try {
       if (await photo.length() > CardStore.maxPhotoBytes) {
-        _notice('Choose a photo that is 20 MB or smaller.');
+        _notice((l10n) => l10n.cardPhotoTooLarge);
         return;
       }
       if (!mounted) return;
       setState(() {
         _photo = File(photo.path);
-        _photoHint = 'Looking for a barcode in the photo…';
+        _photoHint = _PhotoHint.looking;
       });
       scanner = MobileScannerController(autoStart: false);
       final capture = await scanner.analyzeImage(photo.path);
@@ -144,18 +156,18 @@ class _EditCardPageState extends State<EditCardPage> {
       final codes = capture == null ? <_ScannedCode>{} : _readCodes(capture);
       setState(() {
         _photoHint = switch (codes.length) {
-          0 => 'No barcode found in the photo. You can scan or enter it below.',
-          1 => 'Barcode found in the photo.',
-          _ => 'Several barcodes found. Scan the one you want below.',
+          0 => _PhotoHint.none,
+          1 => _PhotoHint.found,
+          _ => _PhotoHint.several,
         };
         if (codes.length == 1) _applyCode(codes.single);
       });
     } catch (_) {
       if (!mounted) return;
       if (scanner == null) {
-        _notice('Could not open this photo.');
+        _notice((l10n) => l10n.cardCouldNotOpenPhoto);
       } else {
-        setState(() => _photoHint = 'You can scan or enter the barcode below.');
+        setState(() => _photoHint = _PhotoHint.enter);
       }
     } finally {
       await scanner?.dispose();
@@ -169,9 +181,7 @@ class _EditCardPageState extends State<EditCardPage> {
       final photo = await _picker.pickImage(source: source);
       if (photo != null && mounted) await _usePhoto(photo);
     } catch (_) {
-      _notice(
-        'Could not open the camera or photo library. Check your permissions.',
-      );
+      _notice((l10n) => l10n.cardPhotoPermissionError);
     } finally {
       if (mounted) setState(() => _working = false);
     }
@@ -193,7 +203,7 @@ class _EditCardPageState extends State<EditCardPage> {
     if (!_form.currentState!.validate()) return;
     final photo = _photo;
     if (photo == null) {
-      _notice('Take or choose a photo before saving.');
+      _notice((l10n) => l10n.cardPhotoRequired);
       return;
     }
     FocusScope.of(context).unfocus();
@@ -208,10 +218,10 @@ class _EditCardPageState extends State<EditCardPage> {
         format: code.isEmpty ? null : _format,
       );
       if (mounted) Navigator.of(context).pop(card);
-    } on FormatException catch (error) {
-      _notice(error.message);
+    } on FormatException {
+      _notice((l10n) => l10n.cardInvalidSave);
     } catch (_) {
-      _notice('Could not save the card. Please try again.');
+      _notice((l10n) => l10n.cardSaveError);
     } finally {
       if (mounted) setState(() => _working = false);
     }
@@ -219,12 +229,23 @@ class _EditCardPageState extends State<EditCardPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final photo = _photo;
     final isNew = widget.card == null;
+    final photoHint = switch (_photoHint) {
+      _PhotoHint.looking => l10n.scanLookingInPhoto,
+      _PhotoHint.none => l10n.scanNoneInPhoto,
+      _PhotoHint.found => l10n.scanFoundInPhoto,
+      _PhotoHint.several => l10n.scanSeveralInPhoto,
+      _PhotoHint.enter => l10n.scanEnterBelow,
+      null => null,
+    };
     return PopScope(
       canPop: !_working,
       child: Scaffold(
-        appBar: AppBar(title: Text(isNew ? 'Add a card' : 'Edit card')),
+        appBar: AppBar(
+          title: Text(isNew ? l10n.cardAddTitle : l10n.cardEditTitle),
+        ),
         body: SafeArea(
           child: Form(
             key: _form,
@@ -236,7 +257,7 @@ class _EditCardPageState extends State<EditCardPage> {
                   if (_working) const LinearProgressIndicator(),
                   if (isNew) ...[
                     Text(
-                      'Original photo',
+                      l10n.cardOriginalPhoto,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
@@ -265,7 +286,9 @@ class _EditCardPageState extends State<EditCardPage> {
                               : () => _takePhoto(ImageSource.camera),
                           icon: const Icon(Icons.photo_camera_outlined),
                           label: Text(
-                            photo == null ? 'Take photo' : 'Retake photo',
+                            photo == null
+                                ? l10n.cardTakePhoto
+                                : l10n.cardRetakePhoto,
                           ),
                         ),
                         OutlinedButton.icon(
@@ -273,13 +296,13 @@ class _EditCardPageState extends State<EditCardPage> {
                               ? null
                               : () => _takePhoto(ImageSource.gallery),
                           icon: const Icon(Icons.photo_library_outlined),
-                          label: const Text('Choose photo'),
+                          label: Text(l10n.cardChoosePhoto),
                         ),
                       ],
                     ),
-                    if (_photoHint case final hint?) ...[
+                    if (photoHint != null) ...[
                       const SizedBox(height: 6),
-                      Text(hint),
+                      Text(photoHint),
                     ],
                     const SizedBox(height: 22),
                   ],
@@ -289,17 +312,17 @@ class _EditCardPageState extends State<EditCardPage> {
                     maxLength: CardStore.maxNameLength,
                     textCapitalization: TextCapitalization.words,
                     textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                      labelText: 'Card name',
-                      hintText: 'For example, my grocery card',
+                    decoration: InputDecoration(
+                      labelText: l10n.cardName,
+                      hintText: l10n.cardNameExample,
                     ),
                     validator: (name) => name == null || name.trim().isEmpty
-                        ? 'Enter a card name.'
+                        ? l10n.cardNameRequired
                         : null,
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Barcode (optional)',
+                    l10n.cardBarcodeOptional,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
@@ -308,7 +331,7 @@ class _EditCardPageState extends State<EditCardPage> {
                     child: OutlinedButton.icon(
                       onPressed: _working ? null : _scan,
                       icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('Scan barcode'),
+                      label: Text(l10n.scanBarcode),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -316,14 +339,14 @@ class _EditCardPageState extends State<EditCardPage> {
                     key: ValueKey(_format),
                     initialValue: _format,
                     isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Barcode format',
+                    decoration: InputDecoration(
+                      labelText: l10n.cardBarcodeFormat,
                     ),
                     items: [
                       for (final format in CardCodeFormat.values)
                         DropdownMenuItem(
                           value: format,
-                          child: Text(format.label),
+                          child: Text(format.localizedLabel(l10n)),
                         ),
                     ],
                     onChanged: _working
@@ -338,18 +361,18 @@ class _EditCardPageState extends State<EditCardPage> {
                     enableSuggestions: false,
                     maxLines: 3,
                     minLines: 1,
-                    decoration: const InputDecoration(
-                      labelText: 'Barcode value',
+                    decoration: InputDecoration(
+                      labelText: l10n.cardBarcodeValue,
                     ),
                     validator: (code) =>
                         code == null || code.isEmpty || _format.accepts(code)
                         ? null
-                        : 'Enter a valid ${_format.label} value.',
+                        : l10n.cardBarcodeInvalid(_format.localizedLabel(l10n)),
                   ),
                   const SizedBox(height: 22),
                   FilledButton(
                     onPressed: _working ? null : _save,
-                    child: const Text('Save card'),
+                    child: Text(l10n.cardSave),
                   ),
                 ],
               ),
@@ -389,11 +412,11 @@ class _CardPageState extends State<CardPage> {
         ShareParams(
           files: [XFile(file.path, mimeType: 'application/json')],
           sharePositionOrigin: origin,
-          title: 'Share loyalty card',
+          title: AppLocalizations.of(context)!.cardShareTitle,
         ),
       );
     } catch (_) {
-      _notice('Could not share this card. Please try again.');
+      _notice((l10n) => l10n.cardShareError);
     } finally {
       if (mounted) setState(() => _working = false);
     }
@@ -411,20 +434,23 @@ class _CardPageState extends State<CardPage> {
   Future<void> _delete() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete this card?'),
-        content: Text('Remove ${_card.name} and its photo from this device?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+      builder: (context) {
+        final l10n = AppLocalizations.of(context)!;
+        return AlertDialog(
+          title: Text(l10n.cardDeleteTitle),
+          content: Text(l10n.cardDeleteConfirm(_card.name)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(l10n.cardCancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(l10n.cardDelete),
+            ),
+          ],
+        );
+      },
     );
     if (!mounted || confirmed != true) return;
     setState(() => _working = true);
@@ -432,14 +458,15 @@ class _CardPageState extends State<CardPage> {
       await widget.store.delete(_card);
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
-      _notice('Could not delete this card. Please try again.');
+      _notice((l10n) => l10n.cardDeleteError);
     } finally {
       if (mounted) setState(() => _working = false);
     }
   }
 
-  void _notice(String text) {
+  void _notice(String Function(AppLocalizations) message) {
     if (!mounted) return;
+    final text = message(AppLocalizations.of(context)!);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
@@ -447,12 +474,12 @@ class _CardPageState extends State<CardPage> {
     final photo = File(_card.photoPath);
     Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (_) => Scaffold(
+        builder: (context) => Scaffold(
           backgroundColor: Colors.black,
           appBar: AppBar(
             backgroundColor: Colors.black,
             foregroundColor: Colors.white,
-            title: const Text('Original photo'),
+            title: Text(AppLocalizations.of(context)!.cardOriginalPhoto),
           ),
           body: SafeArea(
             child: InteractiveViewer(
@@ -467,23 +494,24 @@ class _CardPageState extends State<CardPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final code = _card.code;
     final format = _card.format;
     return PopScope(
       canPop: !_working,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Card'),
+          title: Text(l10n.cardTitle),
           actions: [
             IconButton(
               onPressed: _working ? null : _edit,
               icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Edit card',
+              tooltip: l10n.cardEditTitle,
             ),
             IconButton(
               onPressed: _working ? null : _delete,
               icon: const Icon(Icons.delete_outline),
-              tooltip: 'Delete card',
+              tooltip: l10n.cardDeleteAction,
             ),
           ],
         ),
@@ -505,14 +533,14 @@ class _CardPageState extends State<CardPage> {
                 builder: (buttonContext) => FilledButton.icon(
                   onPressed: _working ? null : () => _share(buttonContext),
                   icon: const Icon(Icons.ios_share),
-                  label: const Text('Share card'),
+                  label: Text(l10n.cardShare),
                 ),
               ),
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _showPhoto,
                 icon: const Icon(Icons.photo_outlined),
-                label: const Text('View original photo'),
+                label: Text(l10n.cardViewOriginalPhoto),
               ),
             ],
           ),
@@ -530,6 +558,8 @@ class _CheckoutCode extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final formatLabel = format.localizedLabel(l10n);
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 16, 12, 18),
       decoration: BoxDecoration(
@@ -538,7 +568,7 @@ class _CheckoutCode extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Text(format.label, style: const TextStyle(color: Colors.black87)),
+          Text(formatLabel, style: const TextStyle(color: Colors.black87)),
           const SizedBox(height: 14),
           LayoutBuilder(
             builder: (context, constraints) {
@@ -549,7 +579,7 @@ class _CheckoutCode extends StatelessWidget {
               final quietZone = width * (format.square ? .14 : .105);
               return Semantics(
                 image: true,
-                label: 'Scannable ${format.label}',
+                label: l10n.scanScannable(formatLabel),
                 child: display.BarcodeWidget(
                   barcode: format.renderer(code),
                   data: code,
@@ -560,9 +590,8 @@ class _CheckoutCode extends StatelessWidget {
                     vertical: format.square ? quietZone : 0,
                   ),
                   drawText: false,
-                  errorBuilder: (_, _) => const Center(
-                    child: Text('Open the original photo to scan this code.'),
-                  ),
+                  errorBuilder: (_, _) =>
+                      Center(child: Text(l10n.scanOpenOriginal)),
                 ),
               );
             },
@@ -589,19 +618,22 @@ class _CardPhoto extends StatelessWidget {
   final double? height;
 
   @override
-  Widget build(BuildContext context) => Image.file(
-    photo,
-    height: height,
-    fit: BoxFit.contain,
-    cacheWidth: height == null ? null : 700,
-    semanticLabel: 'Original loyalty card photo',
-    errorBuilder: (_, _, _) => const Center(
-      child: Text(
-        'Could not display this photo.',
-        style: TextStyle(color: Colors.grey),
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Image.file(
+      photo,
+      height: height,
+      fit: BoxFit.contain,
+      cacheWidth: height == null ? null : 700,
+      semanticLabel: l10n.cardOriginalPhotoLabel,
+      errorBuilder: (_, _, _) => Center(
+        child: Text(
+          l10n.cardPhotoDisplayError,
+          style: const TextStyle(color: Colors.grey),
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _ScannerPage extends StatefulWidget {
@@ -616,14 +648,15 @@ class _ScannerPageState extends State<_ScannerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan barcode')),
+      appBar: AppBar(title: Text(l10n.scanBarcode)),
       body: SafeArea(
         child: Column(
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Center one barcode in the frame.'),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(l10n.scanCenterBarcode),
             ),
             Expanded(
               child: LayoutBuilder(
@@ -667,8 +700,8 @@ class _ScannerPageState extends State<_ScannerPage> {
                         child: Text(
                           error.errorCode ==
                                   MobileScannerErrorCode.permissionDenied
-                              ? 'Allow camera access in Settings, or go back to enter the barcode.'
-                              : 'Camera unavailable. Go back to enter the barcode.',
+                              ? l10n.scanCameraPermissionDenied
+                              : l10n.scanCameraUnavailable,
                           textAlign: TextAlign.center,
                         ),
                       ),

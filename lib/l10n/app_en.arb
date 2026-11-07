@@ -1,0 +1,94 @@
+{
+  "@@locale": "en",
+  "walletTitle": "Your card wallet",
+  "walletCardCount": "{count, plural, one {1 card stored on this device} other {{count} cards stored on this device}}",
+  "@walletCardCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "savedCards": "Saved cards",
+  "walletLoadFailed": "Could not load your wallet",
+  "retry": "Retry",
+  "noCards": "No cards yet",
+  "emptyWallet": "Take a photo of a loyalty card, choose screenshots from another app, or import a shared card file.",
+  "addCard": "Add card",
+  "importCards": "Import cards",
+  "importSharedCard": "Import shared card",
+  "importCardPhotos": "Import photos or screenshots",
+  "photoImportFailed": "Could not import these photos. Please try again.",
+  "photoRecoveryFailed": "The interrupted photo selection could not be restored.",
+  "cardFileType": "Loyalty Pocket card",
+  "cardImported": "Card imported.",
+  "invalidCardFile": "This file is damaged, too large, or in an unsupported format.",
+  "cardFileOpenFailed": "Could not open the card file. Please try again.",
+  "cardPhotoTooLarge": "Choose a photo that is 20 MB or smaller.",
+  "scanLookingInPhoto": "Looking for a barcode in the photo…",
+  "scanNoneInPhoto": "No barcode found in the photo. You can scan or enter it below.",
+  "scanFoundInPhoto": "Barcode found in the photo.",
+  "scanSeveralInPhoto": "Several barcodes found. Scan the one you want below.",
+  "cardCouldNotOpenPhoto": "Could not open this photo.",
+  "scanEnterBelow": "You can scan or enter the barcode below.",
+  "cardPhotoPermissionError": "Could not open the camera or photo library. Check your permissions.",
+  "cardPhotoRequired": "Take or choose a photo before saving.",
+  "cardInvalidSave": "Could not save the card. Check the name, barcode and photo.",
+  "cardSaveError": "Could not save the card. Please try again.",
+  "cardAddTitle": "Add a card",
+  "cardEditTitle": "Edit card",
+  "cardOriginalPhoto": "Original photo",
+  "cardTakePhoto": "Take photo",
+  "cardRetakePhoto": "Retake photo",
+  "cardChoosePhoto": "Choose photo",
+  "cardName": "Card name",
+  "cardNameExample": "For example, my grocery card",
+  "cardNameRequired": "Enter a card name.",
+  "cardBarcodeOptional": "Barcode (optional)",
+  "scanBarcode": "Scan barcode",
+  "cardBarcodeFormat": "Barcode format",
+  "cardBarcodeValue": "Barcode value",
+  "cardBarcodeInvalid": "Enter a valid {format} value.",
+  "cardSave": "Save card",
+  "cardShareTitle": "Share loyalty card",
+  "cardShareError": "Could not share this card. Please try again.",
+  "cardDeleteTitle": "Delete this card?",
+  "cardDeleteConfirm": "Remove {name} and its photo from this device?",
+  "cardCancel": "Cancel",
+  "cardDelete": "Delete",
+  "cardDeleteAction": "Delete card",
+  "cardDeleteError": "Could not delete this card. Please try again.",
+  "cardTitle": "Card",
+  "cardShare": "Share card",
+  "cardViewOriginalPhoto": "View original photo",
+  "scanScannable": "Scannable {format}",
+  "scanOpenOriginal": "Open the original photo to scan this code.",
+  "cardOriginalPhotoLabel": "Original loyalty card photo",
+  "cardPhotoDisplayError": "Could not display this photo.",
+  "scanCenterBarcode": "Center one barcode in the frame.",
+  "scanCameraPermissionDenied": "Allow camera access in Settings, or go back to enter the barcode.",
+  "scanCameraUnavailable": "Camera unavailable. Go back to enter the barcode.",
+  "cardFormatQr": "QR code",
+  "cardFormatDataMatrix": "Data Matrix",
+  "@cardBarcodeInvalid": {
+    "placeholders": {
+      "format": {
+        "type": "String"
+      }
+    }
+  },
+  "@cardDeleteConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "@scanScannable": {
+    "placeholders": {
+      "format": {
+        "type": "String"
+      }
+    }
+  }
+}

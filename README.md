@@ -10,6 +10,10 @@ Loyalty Pocket is an offline wallet for supermarket, retail, and other loyalty c
 
 The app raises display brightness to maximum while it is active. Your regular brightness returns when you leave it. Cards and photos are stored in the app's local storage.
 
+The interface is available in English and Italian and follows your device language. On devices with per-app language settings, you can select English or Italian for Loyalty Pocket.
+
+To move cards from another wallet, take a screenshot of each loyalty barcode, then open **Import cards → Import photos or screenshots**. Select the images together. Loyalty Pocket looks for a barcode in each image and lets you name and review each card before saving it.
+
 ## Share a card
 
 1. Open the card and tap **Share card**.
