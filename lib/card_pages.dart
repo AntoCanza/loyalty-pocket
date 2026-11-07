@@ -89,6 +89,50 @@ Set<_ScannedCode> _readCodes(BarcodeCapture capture) {
 
 enum _PhotoHint { looking, none, found, several, differs, enter }
 
+Future<void> showDuplicateCardDialog(BuildContext context, LoyaltyCard card) =>
+    showDuplicateCardsDialog(context, [card]);
+
+Future<void> showDuplicateCardsDialog(
+  BuildContext context,
+  List<LoyaltyCard> cards,
+) async {
+  if (cards.isEmpty) return;
+  await showDialog<void>(
+    context: context,
+    builder: (context) {
+      final l10n = AppLocalizations.of(context)!;
+      return AlertDialog(
+        scrollable: true,
+        title: Text(
+          cards.length == 1
+              ? l10n.duplicateCardTitle
+              : l10n.duplicateCardsTitle,
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final (index, card) in cards.indexed) ...[
+              if (index > 0) const SizedBox(height: 12),
+              Text(card.name, style: Theme.of(context).textTheme.titleMedium),
+              if (card.note case final note?) ...[
+                const SizedBox(height: 4),
+                Text(note),
+              ],
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(MaterialLocalizations.of(context).okButtonLabel),
+          ),
+        ],
+      );
+    },
+  );
+}
+
 class EditCardPage extends StatefulWidget {
   const EditCardPage({
     super.key,
@@ -110,6 +154,7 @@ class _EditCardPageState extends State<EditCardPage> {
   final _picker = ImagePicker();
   late final _name = TextEditingController(text: widget.card?.name);
   late final _code = TextEditingController(text: widget.card?.code);
+  late final _note = TextEditingController(text: widget.card?.note);
   late CardCodeFormat? _format = widget.card == null
       ? CardCodeFormat.code128
       : widget.card!.format;
@@ -130,6 +175,7 @@ class _EditCardPageState extends State<EditCardPage> {
   void dispose() {
     _name.dispose();
     _code.dispose();
+    _note.dispose();
     super.dispose();
   }
 
@@ -140,6 +186,8 @@ class _EditCardPageState extends State<EditCardPage> {
   }
 
   Future<void> _usePhoto(XFile photo) async {
+    final previousPhoto = _photo;
+    final previousHint = _photoHint;
     setState(() => _working = true);
     MobileScannerController? scanner;
     try {
@@ -157,6 +205,18 @@ class _EditCardPageState extends State<EditCardPage> {
       if (!mounted) return;
       final codes = capture == null ? <_ScannedCode>{} : _readCodes(capture);
       final scannedCode = codes.length == 1 ? codes.single : null;
+      if (scannedCode != null) {
+        final duplicate = await _findDuplicate(scannedCode);
+        if (!mounted) return;
+        if (duplicate != null) {
+          setState(() {
+            _photo = previousPhoto;
+            _photoHint = previousHint;
+          });
+          await showDuplicateCardDialog(context, duplicate);
+          return;
+        }
+      }
       final matchesCard =
           widget.card == null ||
           _code.text.isEmpty ||
@@ -199,11 +259,28 @@ class _EditCardPageState extends State<EditCardPage> {
     _format = code.format;
   }
 
+  Future<LoyaltyCard?> _findDuplicate(_ScannedCode code) => widget.store
+      .findDuplicate(code.value, code.format, excludingId: widget.card?.id);
+
   Future<void> _scan() async {
     final result = await Navigator.of(context).push<_ScannedCode>(
       MaterialPageRoute(builder: (_) => const _ScannerPage()),
     );
-    if (mounted && result != null) setState(() => _applyCode(result));
+    if (!mounted || result == null) return;
+    setState(() => _working = true);
+    try {
+      final duplicate = await _findDuplicate(result);
+      if (!mounted) return;
+      if (duplicate != null) {
+        await showDuplicateCardDialog(context, duplicate);
+      } else {
+        setState(() => _applyCode(result));
+      }
+    } catch (_) {
+      _notice((l10n) => l10n.scanCheckError);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
   }
 
   Future<void> _save() async {
@@ -223,8 +300,11 @@ class _EditCardPageState extends State<EditCardPage> {
         photo: photo,
         code: code.isEmpty ? null : code,
         format: code.isEmpty ? null : _format,
+        note: _note.text,
       );
       if (mounted) Navigator.of(context).pop(card);
+    } on DuplicateCardException catch (error) {
+      if (mounted) await showDuplicateCardDialog(context, error.existing);
     } on FormatException {
       _notice((l10n) => l10n.cardInvalidSave);
     } catch (_) {
@@ -386,6 +466,18 @@ class _EditCardPageState extends State<EditCardPage> {
                         format.localizedLabel(l10n),
                       );
                     },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _note,
+                    enabled: !_working,
+                    maxLength: CardStore.maxNoteLength,
+                    minLines: 1,
+                    maxLines: 3,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      labelText: l10n.cardNoteOptional,
+                    ),
                   ),
                   const SizedBox(height: 22),
                   FilledButton(
@@ -554,6 +646,10 @@ class _CardPageState extends State<CardPage> {
                   format: format,
                   hasOriginalPhoto: photoPath != null,
                 ),
+              if (_card.note case final note?) ...[
+                const SizedBox(height: 12),
+                Text(note),
+              ],
               const SizedBox(height: 12),
               Builder(
                 builder: (buttonContext) => FilledButton.icon(

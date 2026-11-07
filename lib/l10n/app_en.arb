@@ -1,15 +1,5 @@
 {
   "@@locale": "en",
-  "walletTitle": "Your card wallet",
-  "walletCardCount": "{count, plural, one {1 card stored on this device} other {{count} cards stored on this device}}",
-  "@walletCardCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "savedCards": "Saved cards",
   "walletLoadFailed": "Could not load your wallet",
   "retry": "Retry",
   "noCards": "No cards yet",
@@ -135,5 +125,82 @@
   "themeSystem": "System default",
   "themeLight": "Light",
   "themeDark": "Dark",
-  "themeSaveFailed": "Could not save your theme preference."
+  "themeSaveFailed": "Could not save your theme preference.",
+  "cardNoteOptional": "Note (optional)",
+  "duplicateCardsTitle": "Cards already registered",
+  "scanCheckError": "Could not check if the card was already registered. Please try again.",
+  "duplicateCardTitle": "Card already registered",
+  "addCardNote": "Add a note for {name}",
+  "editCardNote": "Edit the note for {name}",
+  "cardNoteTitle": "Note for {name}",
+  "saveCardNote": "Save note",
+  "noteSaveFailed": "Could not save the note. Please try again.",
+  "@addCardNote": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "@editCardNote": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "@cardNoteTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "nearbyMergeTitle": "Merge with nearby devices",
+  "nearbyMergeInstructions": "Connect the devices to the same Wi-Fi network and open this screen on each one. Select the devices you want to merge with.",
+  "nearbyMergeOwnDevice": "This device is {name}",
+  "@nearbyMergeOwnDevice": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "nearbyMergeSearching": "Looking for devices…",
+  "nearbyMergeNoPeers": "No nearby devices found yet.",
+  "nearbyMergeStart": "Merge cards",
+  "nearbyMergeWorking": "Merging cards…",
+  "nearbyMergeDiscoveryError": "Could not start nearby discovery. Check your local network connection and permissions.",
+  "nearbyMergeRetry": "Try again",
+  "nearbyMergePairTitle": "Pair with {name}?",
+  "@nearbyMergePairTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "nearbyMergePairInstructions": "Check that both devices show the same code before confirming.",
+  "nearbyMergePairConfirm": "Codes match",
+  "nearbyMergeComplete": "{sent, plural, one {1 copy sent} other {{sent} copies sent}}. {received, plural, one {1 card received} other {{received} cards received}}.",
+  "@nearbyMergeComplete": {
+    "placeholders": {
+      "sent": {
+        "type": "int"
+      },
+      "received": {
+        "type": "int"
+      }
+    }
+  },
+  "nearbyMergePartial": "Some devices could not finish the merge. You can try again.",
+  "nearbyMergeUnavailable": "Could not pair with the selected devices.",
+  "nearbyMergeIncoming": "{count, plural, one {1 card received from nearby devices} other {{count} cards received from nearby devices}}",
+  "@nearbyMergeIncoming": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
 }

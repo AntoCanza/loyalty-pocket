@@ -113,6 +113,7 @@ void main() {
       expect(imported.photoPath, isNull);
       expect(imported.format, isNull);
       expect(imported.code, ' 0007 ');
+      expect(imported.note, isNull);
 
       final restored = (await CardStore(wallet).load()).single;
       expect(restored.id, imported.id);
@@ -140,6 +141,277 @@ void main() {
     expect(await File(updated.photoPath!).readAsBytes(), _png);
   });
 
+  test('updates, shares, and clears an optional card note', () async {
+    final saved = await store.save(
+      name: 'Market',
+      photo: original,
+      code: '0007',
+      note: '  Use at checkout  ',
+    );
+    final renamed = await store.save(
+      existing: saved,
+      name: 'Main Street Market',
+      photo: null,
+      code: '0008',
+    );
+    expect(renamed.note, 'Use at checkout');
+    final updated = await store.updateNote(saved, '  Weekly shop  ');
+    expect(updated.name, renamed.name);
+    expect(updated.code, renamed.code);
+    expect(updated.photoPath, saved.photoPath);
+    expect(updated.note, 'Weekly shop');
+
+    final restored = (await CardStore(wallet).load()).single;
+    expect(restored.note, updated.note);
+    final shared = await store.exportCard(restored, temporary);
+    final other = CardStore(Directory.fromUri(temporary.uri.resolve('other/')));
+    final imported = await other.importCard(shared.openRead());
+    expect(imported.note, updated.note);
+    expect(await File(imported.photoPath!).readAsBytes(), _png);
+
+    final cleared = await store.save(
+      existing: restored,
+      name: restored.name,
+      photo: null,
+      code: restored.code,
+      note: '',
+    );
+    expect(cleared.note, isNull);
+    expect((await CardStore(wallet).load()).single.note, isNull);
+  });
+
+  test('rejects repeated codes during queued saves and imports', () async {
+    final first = store.save(
+      name: 'Market',
+      photo: null,
+      code: '0007',
+      note: 'Weekly shop',
+    );
+    final second = store.save(
+      name: 'Duplicate',
+      photo: null,
+      code: '0007',
+      format: CardCodeFormat.code128,
+    );
+    final rejected = expectLater(
+      second,
+      throwsA(
+        isA<DuplicateCardException>()
+            .having((error) => error.existing.name, 'name', 'Market')
+            .having((error) => error.existing.note, 'note', 'Weekly shop'),
+      ),
+    );
+    final saved = await first;
+    await rejected;
+    final detected = await store.findDuplicate('0007', CardCodeFormat.qr);
+    expect(detected?.id, saved.id);
+    expect(
+      await store.findDuplicate('0007', null, excludingId: saved.id),
+      isNull,
+    );
+
+    final shared = await store.exportCard(saved, temporary);
+    await expectLater(
+      store.importCard(shared.openRead()),
+      throwsA(
+        isA<DuplicateCardException>().having(
+          (error) => error.existing.id,
+          'existing ID',
+          saved.id,
+        ),
+      ),
+    );
+    expect((await store.load()).single.id, saved.id);
+  });
+
+  test(
+    'leaves legacy duplicates editable but rejects a conflicting edit',
+    () async {
+      const code = '036000291452';
+      final first = await store.save(
+        name: 'Market',
+        photo: null,
+        code: code,
+        format: CardCodeFormat.upcA,
+      );
+      final second = await store.save(name: 'Other', photo: null, code: '0008');
+      expect(
+        (await store.findDuplicate('0$code', CardCodeFormat.ean13))?.id,
+        first.id,
+      );
+      expect(
+        await store.findDuplicate('0$code', CardCodeFormat.code128),
+        isNull,
+      );
+      await expectLater(
+        store.save(
+          existing: second,
+          name: second.name,
+          photo: null,
+          code: '0$code',
+          format: CardCodeFormat.ean13,
+        ),
+        throwsA(isA<DuplicateCardException>()),
+      );
+
+      final metadata = File.fromUri(
+        wallet.uri.resolve('${second.id}/card.json'),
+      );
+      await metadata.writeAsString(
+        jsonEncode({
+          'version': 1,
+          'name': second.name,
+          'code': code,
+          'format': 'upcA',
+          'photo': null,
+        }),
+      );
+      final updated = await store.save(
+        existing: second,
+        name: 'Legacy duplicate',
+        photo: null,
+        code: code,
+        format: CardCodeFormat.upcA,
+        note: 'Keep both old cards',
+      );
+      expect(updated.id, second.id);
+      expect(updated.note, 'Keep both old cards');
+      expect(await store.load(), hasLength(2));
+    },
+  );
+
+  test(
+    'merges a card with its stable ID and keeps later local edits',
+    () async {
+      final source = await store.save(
+        name: 'Market',
+        photo: original,
+        code: '0007',
+        note: 'Source note',
+      );
+      final manifest = (await store.mergeManifest()).single;
+      expect(manifest.id, source.id);
+      expect(manifest.keys, hasLength(2));
+      expect(manifest.keys, everyElement(matches(RegExp(r'^[0-9a-f]{64}$'))));
+      expect(await store.exportForMerge('0' * 48), isNull);
+
+      final bytes = (await store.exportForMerge(source.id))!;
+      final receiver = CardStore(
+        Directory.fromUri(temporary.uri.resolve('receiver/')),
+      );
+      expect(
+        await Future.wait([
+          receiver.importForMerge(bytes),
+          receiver.importForMerge(bytes),
+        ]),
+        [true, false],
+      );
+      final received = (await receiver.load()).single;
+      expect(received.id, source.id);
+      expect(received.note, source.note);
+      expect(received.code, source.code);
+      expect(await File(received.photoPath!).readAsBytes(), _png);
+      expect((await receiver.mergeManifest()).single.keys, manifest.keys);
+
+      final newPhoto = File.fromUri(temporary.uri.resolve('local.gif'));
+      await newPhoto.writeAsBytes(_gif);
+      await receiver.save(
+        existing: received,
+        name: 'Local name',
+        code: '0008',
+        note: 'Local note',
+        photo: newPhoto,
+      );
+      expect(await receiver.importForMerge(bytes), isFalse);
+      final unchanged = (await receiver.load()).single;
+      expect(unchanged.name, 'Local name');
+      expect(unchanged.code, '0008');
+      expect(unchanged.note, 'Local note');
+      expect(await File(unchanged.photoPath!).readAsBytes(), _gif);
+
+      final data = jsonDecode(utf8.decode(bytes)) as Map<String, Object?>;
+      await expectLater(
+        receiver.importForMerge(
+          utf8.encode(jsonEncode({...data, 'id': '../outside'})),
+        ),
+        throwsFormatException,
+      );
+      expect(await receiver.load(), hasLength(1));
+    },
+  );
+
+  test(
+    'merges equivalent barcodes and identical photo-only cards once',
+    () async {
+      const code = '036000291452';
+      final sourceCode = await store.save(
+        name: 'Source barcode',
+        photo: null,
+        code: code,
+        format: CardCodeFormat.upcA,
+      );
+      final sourcePhoto = await store.save(
+        name: 'Source photo',
+        photo: original,
+      );
+      final receiver = CardStore(
+        Directory.fromUri(temporary.uri.resolve('receiver/')),
+      );
+      final localCode = await receiver.save(
+        name: 'Local barcode',
+        note: 'Local note',
+        photo: null,
+        code: '0$code',
+        format: CardCodeFormat.ean13,
+      );
+      final localPhoto = await receiver.save(
+        name: 'Local photo',
+        photo: original,
+      );
+      final sourceRefs = {
+        for (final ref in await store.mergeManifest()) ref.id: ref,
+      };
+      final localRefs = {
+        for (final ref in await receiver.mergeManifest()) ref.id: ref,
+      };
+      expect(
+        sourceRefs[sourceCode.id]!.keys.any(
+          localRefs[localCode.id]!.keys.contains,
+        ),
+        isTrue,
+      );
+      expect(
+        sourceRefs[sourcePhoto.id]!.keys.any(
+          localRefs[localPhoto.id]!.keys.contains,
+        ),
+        isTrue,
+      );
+      expect(
+        await receiver.importForMerge(
+          (await store.exportForMerge(sourceCode.id))!,
+        ),
+        isFalse,
+      );
+      expect(
+        await receiver.importForMerge(
+          (await store.exportForMerge(sourcePhoto.id))!,
+        ),
+        isFalse,
+      );
+
+      final received = {
+        for (final card in await receiver.load()) card.id: card,
+      };
+      expect(received.keys, unorderedEquals([localCode.id, localPhoto.id]));
+      expect(received[localCode.id]!.note, 'Local note');
+      expect(received[localPhoto.id]!.name, 'Local photo');
+      expect(
+        await File(received[localPhoto.id]!.photoPath!).readAsBytes(),
+        _png,
+      );
+    },
+  );
+
   test('rejects invalid shared files without creating cards', () async {
     final share = File.fromUri(
       temporary.uri.resolve('invalid.loyalty-card.json'),
@@ -155,6 +427,8 @@ void main() {
       {'photoExtension': '../png'},
       {'photoBase64': base64Encode(utf8.encode('This is plain text.'))},
       {'format': 'qr'},
+      {'note': 123},
+      {'note': 'x' * (CardStore.maxNoteLength + 1)},
       {'photoBase64': null, 'code': '0007'},
       {'photoExtension': null, 'code': '0007'},
     ]) {
