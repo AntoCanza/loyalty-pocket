@@ -71,5 +71,10 @@
   "cardDeleteWithoutPhoto": "Vuoi rimuovere {name} da questo dispositivo?",
   "cardBarcodeTooLong": "Inserisci al massimo {maxLength} caratteri.",
   "scanPhotoCodeDiffers": "Il codice a barre nella foto è diverso dal numero salvato. Controlla il numero prima di salvare.",
-  "scanBarcodeUnavailable": "Impossibile visualizzare il codice a barre. Usa il numero della carta qui sotto."
+  "scanBarcodeUnavailable": "Impossibile visualizzare il codice a barre. Usa il numero della carta qui sotto.",
+  "themeAppearance": "Aspetto",
+  "themeSystem": "Come il dispositivo",
+  "themeLight": "Chiaro",
+  "themeDark": "Scuro",
+  "themeSaveFailed": "Impossibile salvare la preferenza del tema."
 }

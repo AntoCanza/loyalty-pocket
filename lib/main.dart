@@ -6,21 +6,35 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'app_theme.dart';
 import 'card_pages.dart';
 import 'card_store.dart';
 import 'l10n/app_localizations.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const LoyaltyPocketApp());
+  runApp(LoyaltyPocketApp(initialTheme: await AppThemePreference.read()));
 }
 
 const _ink = Color(0xFF123B34);
-const _canvas = Color(0xFFF3F6F0);
 const _mint = Color(0xFFBCEED1);
 
-class LoyaltyPocketApp extends StatelessWidget {
-  const LoyaltyPocketApp({super.key});
+class LoyaltyPocketApp extends StatefulWidget {
+  const LoyaltyPocketApp({super.key, this.initialTheme = ThemeMode.system});
+
+  final ThemeMode initialTheme;
+
+  @override
+  State<LoyaltyPocketApp> createState() => _LoyaltyPocketAppState();
+}
+
+class _LoyaltyPocketAppState extends State<LoyaltyPocketApp> {
+  late ThemeMode _themeMode = widget.initialTheme;
+
+  Future<void> _setThemeMode(ThemeMode mode) async {
+    setState(() => _themeMode = mode);
+    await AppThemePreference.write(mode);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,18 +43,10 @@ class LoyaltyPocketApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: _ink),
-        scaffoldBackgroundColor: _canvas,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: _canvas,
-          foregroundColor: _ink,
-        ),
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
-        ),
-      ),
-      home: const _WalletPage(),
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: _themeMode,
+      home: _WalletPage(themeMode: _themeMode, onThemeChanged: _setThemeMode),
     );
   }
 }
@@ -48,7 +54,10 @@ class LoyaltyPocketApp extends StatelessWidget {
 enum _ImportKind { file, photos }
 
 class _WalletPage extends StatefulWidget {
-  const _WalletPage();
+  const _WalletPage({required this.themeMode, required this.onThemeChanged});
+
+  final ThemeMode themeMode;
+  final Future<void> Function(ThemeMode) onThemeChanged;
 
   @override
   State<_WalletPage> createState() => _WalletPageState();
@@ -212,6 +221,16 @@ class _WalletPageState extends State<_WalletPage> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
+          AppThemeButton(
+            mode: widget.themeMode,
+            onChanged: (mode) async {
+              try {
+                await widget.onThemeChanged(mode);
+              } catch (_) {
+                _notice((l10n) => l10n.themeSaveFailed);
+              }
+            },
+          ),
           PopupMenuButton<_ImportKind>(
             tooltip: l10n.importCards,
             icon: const Icon(Icons.file_download_outlined),

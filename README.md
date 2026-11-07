@@ -12,6 +12,8 @@ The app raises display brightness to maximum while it is active. Your regular br
 
 The interface is available in English and Italian and follows your device language. On devices with per-app language settings, you can select English or Italian for Loyalty Pocket.
 
+The appearance menu offers **Use device theme**, **Light**, and **Dark**. The app remembers your choice and displays barcodes on a white background.
+
 To move cards from another wallet, take a screenshot of each loyalty barcode, then open **Import cards → Import photos or screenshots**. Select the images together. Loyalty Pocket looks for a barcode in each image and lets you name and review each card before saving it.
 
 If only a membership number is available, you can save it and add a photo later. The app displays the number by itself when its barcode format is unknown.

@@ -130,5 +130,10 @@
     }
   },
   "scanPhotoCodeDiffers": "The barcode in this photo differs from the saved number. Check the number before saving.",
-  "scanBarcodeUnavailable": "This barcode could not be displayed. Use the card number below."
+  "scanBarcodeUnavailable": "This barcode could not be displayed. Use the card number below.",
+  "themeAppearance": "Appearance",
+  "themeSystem": "System default",
+  "themeLight": "Light",
+  "themeDark": "Dark",
+  "themeSaveFailed": "Could not save your theme preference."
 }

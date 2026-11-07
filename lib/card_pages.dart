@@ -641,6 +641,7 @@ class _CheckoutCode extends StatelessWidget {
                         hasOriginalPhoto
                             ? l10n.scanOpenOriginal
                             : l10n.scanBarcodeUnavailable,
+                        style: const TextStyle(color: Colors.black87),
                       ),
                     ),
                   ),
