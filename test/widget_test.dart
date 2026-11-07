@@ -60,4 +60,30 @@ void main() {
       expect(tester.widget<Image>(find.byType(Image)).image, FileImage(photo));
     });
   }
+
+  testWidgets('shows the exact membership number when its format is unknown', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('loyalty-number-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    const card = LoyaltyCard(
+      id: 'test',
+      name: 'Grocery rewards',
+      photoPath: null,
+      code: '0001234567890',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('it'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: CardPage(store: CardStore(directory), card: card),
+      ),
+    );
+
+    expect(find.text('Numero della carta'), findsOneWidget);
+    expect(find.text('0001234567890'), findsOneWidget);
+    expect(find.byType(BarcodeWidget), findsNothing);
+    expect(find.text('Aggiungi foto originale'), findsOneWidget);
+  });
 }

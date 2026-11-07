@@ -151,13 +151,35 @@ class _WalletPageState extends State<_WalletPage> {
         mimeTypes: const ['application/json'],
         uniformTypeIdentifiers: const ['public.json'],
       );
-      final file = await openFile(acceptedTypeGroups: [json]);
-      if (file == null || !mounted) return;
-      await (await _store).importCard(file.openRead());
+      final files = await openFiles(acceptedTypeGroups: [json]);
+      if (files.isEmpty || !mounted) return;
+      final store = await _store;
+      var imported = 0;
+      var invalid = 0;
+      for (final file in files) {
+        try {
+          await store.importCard(file.openRead());
+          imported++;
+        } on FormatException {
+          invalid++;
+        } catch (_) {
+          // A file that could not be read does not prevent the rest from loading.
+        }
+      }
+      if (imported == 0) {
+        _notice(
+          (l10n) => invalid == files.length
+              ? l10n.invalidCardFile
+              : l10n.cardFileOpenFailed,
+        );
+        return;
+      }
       await _load();
-      _notice((l10n) => l10n.cardImported);
-    } on FormatException {
-      _notice((l10n) => l10n.invalidCardFile);
+      _notice(
+        (l10n) => imported == files.length
+            ? l10n.cardsImported(imported)
+            : l10n.cardsImportedPartial(imported, files.length - imported),
+      );
     } catch (_) {
       _notice((l10n) => l10n.cardFileOpenFailed);
     } finally {
@@ -311,22 +333,30 @@ class _WalletPageState extends State<_WalletPage> {
                   margin: const EdgeInsets.only(bottom: 8),
                   clipBehavior: Clip.antiAlias,
                   child: ListTile(
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.file(
-                        File(card.photoPath),
-                        width: 54,
-                        height: 44,
-                        fit: BoxFit.cover,
-                        cacheWidth: 160,
-                        errorBuilder: (_, _, _) =>
-                            const Icon(Icons.credit_card_outlined),
+                    leading: switch (card.photoPath) {
+                      final path? => ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.file(
+                          File(path),
+                          width: 54,
+                          height: 44,
+                          fit: BoxFit.cover,
+                          cacheWidth: 160,
+                          errorBuilder: (_, _, _) =>
+                              const Icon(Icons.credit_card_outlined),
+                        ),
                       ),
-                    ),
+                      null => const SizedBox(
+                        width: 54,
+                        child: Icon(Icons.credit_card_outlined),
+                      ),
+                    },
                     title: Text(card.name),
                     subtitle: Text(
                       card.format?.localizedLabel(l10n) ??
-                          l10n.cardOriginalPhoto,
+                          (card.code == null
+                              ? l10n.cardOriginalPhoto
+                              : l10n.cardMembershipNumber),
                     ),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => _openCard(card),

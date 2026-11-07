@@ -16,14 +16,13 @@
   "emptyWallet": "Take a photo of a loyalty card, choose screenshots from another app, or import a shared card file.",
   "addCard": "Add card",
   "importCards": "Import cards",
-  "importSharedCard": "Import shared card",
+  "importSharedCard": "Import card files",
   "importCardPhotos": "Import photos or screenshots",
   "photoImportFailed": "Could not import these photos. Please try again.",
   "photoRecoveryFailed": "The interrupted photo selection could not be restored.",
   "cardFileType": "Loyalty Pocket card",
-  "cardImported": "Card imported.",
-  "invalidCardFile": "This file is damaged, too large, or in an unsupported format.",
-  "cardFileOpenFailed": "Could not open the card file. Please try again.",
+  "invalidCardFile": "The card files are damaged, too large, or in an unsupported format.",
+  "cardFileOpenFailed": "Could not open the card files. Please try again.",
   "cardPhotoTooLarge": "Choose a photo that is 20 MB or smaller.",
   "scanLookingInPhoto": "Looking for a barcode in the photo…",
   "scanNoneInPhoto": "No barcode found in the photo. You can scan or enter it below.",
@@ -32,7 +31,6 @@
   "cardCouldNotOpenPhoto": "Could not open this photo.",
   "scanEnterBelow": "You can scan or enter the barcode below.",
   "cardPhotoPermissionError": "Could not open the camera or photo library. Check your permissions.",
-  "cardPhotoRequired": "Take or choose a photo before saving.",
   "cardInvalidSave": "Could not save the card. Check the name, barcode and photo.",
   "cardSaveError": "Could not save the card. Please try again.",
   "cardAddTitle": "Add a card",
@@ -90,5 +88,47 @@
         "type": "String"
       }
     }
-  }
+  },
+  "cardsImported": "{count, plural, one {1 card imported.} other {{count} cards imported.}}",
+  "cardsImportedPartial": "{count, plural, one {1 card imported.} other {{count} cards imported.}} {failed, plural, one {1 file could not be opened.} other {{failed} files could not be opened.}}",
+  "@cardsImported": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "@cardsImportedPartial": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "failed": {
+        "type": "int"
+      }
+    }
+  },
+  "cardPhotoOrNumberRequired": "Add a photo or enter a card number before saving.",
+  "cardFormatUnknown": "Unknown format",
+  "cardMembershipNumber": "Card number",
+  "cardBarcodeFormatPending": "Edit the card to scan a barcode or select its format.",
+  "cardAddOriginalPhoto": "Add original photo",
+  "cardDeleteWithoutPhoto": "Remove {name} from this device?",
+  "@cardDeleteWithoutPhoto": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "cardBarcodeTooLong": "Enter at most {maxLength} characters.",
+  "@cardBarcodeTooLong": {
+    "placeholders": {
+      "maxLength": {
+        "type": "int"
+      }
+    }
+  },
+  "scanPhotoCodeDiffers": "The barcode in this photo differs from the saved number. Check the number before saving.",
+  "scanBarcodeUnavailable": "This barcode could not be displayed. Use the card number below."
 }

@@ -42,7 +42,7 @@ void main() {
     expect(restored.code, '0001234567895');
     expect(restored.format, CardCodeFormat.ean13);
     expect(restored.photoPath, endsWith('.png'));
-    expect(await File(restored.photoPath).readAsBytes(), _png);
+    expect(await File(restored.photoPath!).readAsBytes(), _png);
   });
 
   test(
@@ -65,7 +65,7 @@ void main() {
       expect(imported.name, saved.name);
       expect(imported.code, ' 0007 ');
       expect(imported.format, CardCodeFormat.code128);
-      expect(await File(imported.photoPath).readAsBytes(), _png);
+      expect(await File(imported.photoPath!).readAsBytes(), _png);
     },
   );
 
@@ -74,7 +74,7 @@ void main() {
     final renamed = await store.save(
       existing: saved,
       name: 'Main Street Market',
-      photo: File(saved.photoPath),
+      photo: File(saved.photoPath!),
       code: '0012',
       format: CardCodeFormat.code128,
     );
@@ -89,13 +89,55 @@ void main() {
     );
     expect(replaced.id, saved.id);
     expect(replaced.photoPath, endsWith('.gif'));
-    expect(await File(replaced.photoPath).readAsBytes(), _gif);
-    expect(await File(saved.photoPath).exists(), isFalse);
+    expect(await File(replaced.photoPath!).readAsBytes(), _gif);
+    expect(await File(saved.photoPath!).exists(), isFalse);
     expect((await store.load()).single.code, isNull);
 
     await store.delete(replaced);
     expect(await store.load(), isEmpty);
-    expect(await File(replaced.photoPath).exists(), isFalse);
+    expect(await File(replaced.photoPath!).exists(), isFalse);
+  });
+
+  test(
+    'imports and shares an exact number without a photo or format',
+    () async {
+      final data = <String, Object?>{
+        'version': 1,
+        'name': 'Market',
+        'code': ' 0007 ',
+        'format': null,
+      };
+      final imported = await store.importCard(
+        Stream.value(utf8.encode(jsonEncode(data))),
+      );
+      expect(imported.photoPath, isNull);
+      expect(imported.format, isNull);
+      expect(imported.code, ' 0007 ');
+
+      final restored = (await CardStore(wallet).load()).single;
+      expect(restored.id, imported.id);
+      expect(restored.photoPath, isNull);
+      expect(restored.code, imported.code);
+      final shared = await store.exportCard(restored, temporary);
+      expect(jsonDecode(await shared.readAsString()), data);
+    },
+  );
+
+  test('adds a photo to an existing number-only card', () async {
+    final saved = await store.save(name: 'Market', code: '0007', photo: null);
+    await expectLater(
+      store.save(existing: saved, name: saved.name, photo: null),
+      throwsFormatException,
+    );
+    final updated = await store.save(
+      existing: saved,
+      name: saved.name,
+      photo: original,
+      code: saved.code,
+    );
+    expect(updated.id, saved.id);
+    expect(updated.code, saved.code);
+    expect(await File(updated.photoPath!).readAsBytes(), _png);
   });
 
   test('rejects invalid shared files without creating cards', () async {
@@ -113,11 +155,26 @@ void main() {
       {'photoExtension': '../png'},
       {'photoBase64': base64Encode(utf8.encode('This is plain text.'))},
       {'format': 'qr'},
-      {'code': '0007'},
+      {'photoBase64': null, 'code': '0007'},
+      {'photoExtension': null, 'code': '0007'},
     ]) {
       await share.writeAsString(jsonEncode({...data, ...changes}));
       await expectLater(
         store.importCard(share.openRead()),
+        throwsFormatException,
+      );
+    }
+    for (final malformed in [
+      {'version': 1, 'name': 'Market'},
+      {
+        'version': 1,
+        'name': 'Market',
+        'code': '0007',
+        'photoBase64': base64Encode(_png),
+      },
+    ]) {
+      await expectLater(
+        store.importCard(Stream.value(utf8.encode(jsonEncode(malformed)))),
         throwsFormatException,
       );
     }

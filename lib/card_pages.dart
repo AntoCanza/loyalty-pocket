@@ -87,7 +87,7 @@ Set<_ScannedCode> _readCodes(BarcodeCapture capture) {
   return codes;
 }
 
-enum _PhotoHint { looking, none, found, several, enter }
+enum _PhotoHint { looking, none, found, several, differs, enter }
 
 class EditCardPage extends StatefulWidget {
   const EditCardPage({
@@ -110,7 +110,9 @@ class _EditCardPageState extends State<EditCardPage> {
   final _picker = ImagePicker();
   late final _name = TextEditingController(text: widget.card?.name);
   late final _code = TextEditingController(text: widget.card?.code);
-  late CardCodeFormat _format = widget.card?.format ?? CardCodeFormat.code128;
+  late CardCodeFormat? _format = widget.card == null
+      ? CardCodeFormat.code128
+      : widget.card!.format;
   File? _photo;
   bool _working = false;
   _PhotoHint? _photoHint;
@@ -118,8 +120,8 @@ class _EditCardPageState extends State<EditCardPage> {
   @override
   void initState() {
     super.initState();
-    final card = widget.card;
-    if (card != null) _photo = File(card.photoPath);
+    final photoPath = widget.card?.photoPath;
+    if (photoPath != null) _photo = File(photoPath);
     final recovered = widget.recoveredPhoto;
     if (recovered != null) _usePhoto(recovered);
   }
@@ -154,13 +156,18 @@ class _EditCardPageState extends State<EditCardPage> {
       final capture = await scanner.analyzeImage(photo.path);
       if (!mounted) return;
       final codes = capture == null ? <_ScannedCode>{} : _readCodes(capture);
+      final scannedCode = codes.length == 1 ? codes.single : null;
+      final matchesCard =
+          widget.card == null ||
+          _code.text.isEmpty ||
+          scannedCode?.value == _code.text;
       setState(() {
         _photoHint = switch (codes.length) {
           0 => _PhotoHint.none,
-          1 => _PhotoHint.found,
+          1 => matchesCard ? _PhotoHint.found : _PhotoHint.differs,
           _ => _PhotoHint.several,
         };
-        if (codes.length == 1) _applyCode(codes.single);
+        if (scannedCode != null && matchesCard) _applyCode(scannedCode);
       });
     } catch (_) {
       if (!mounted) return;
@@ -202,14 +209,14 @@ class _EditCardPageState extends State<EditCardPage> {
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     final photo = _photo;
-    if (photo == null) {
-      _notice((l10n) => l10n.cardPhotoRequired);
+    final code = _code.text;
+    if (photo == null && code.trim().isEmpty) {
+      _notice((l10n) => l10n.cardPhotoOrNumberRequired);
       return;
     }
     FocusScope.of(context).unfocus();
     setState(() => _working = true);
     try {
-      final code = _code.text;
       final card = await widget.store.save(
         existing: widget.card,
         name: _name.text,
@@ -231,12 +238,14 @@ class _EditCardPageState extends State<EditCardPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final photo = _photo;
+    final format = _format;
     final isNew = widget.card == null;
     final photoHint = switch (_photoHint) {
       _PhotoHint.looking => l10n.scanLookingInPhoto,
       _PhotoHint.none => l10n.scanNoneInPhoto,
       _PhotoHint.found => l10n.scanFoundInPhoto,
       _PhotoHint.several => l10n.scanSeveralInPhoto,
+      _PhotoHint.differs => l10n.scanPhotoCodeDiffers,
       _PhotoHint.enter => l10n.scanEnterBelow,
       null => null,
     };
@@ -255,7 +264,7 @@ class _EditCardPageState extends State<EditCardPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (_working) const LinearProgressIndicator(),
-                  if (isNew) ...[
+                  if (widget.card?.photoPath == null) ...[
                     Text(
                       l10n.cardOriginalPhoto,
                       style: Theme.of(context).textTheme.titleMedium,
@@ -336,22 +345,23 @@ class _EditCardPageState extends State<EditCardPage> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<CardCodeFormat>(
-                    key: ValueKey(_format),
-                    initialValue: _format,
+                    key: ValueKey(format),
+                    initialValue: format,
                     isExpanded: true,
                     decoration: InputDecoration(
                       labelText: l10n.cardBarcodeFormat,
                     ),
                     items: [
-                      for (final format in CardCodeFormat.values)
+                      DropdownMenuItem(child: Text(l10n.cardFormatUnknown)),
+                      for (final choice in CardCodeFormat.values)
                         DropdownMenuItem(
-                          value: format,
-                          child: Text(format.localizedLabel(l10n)),
+                          value: choice,
+                          child: Text(choice.localizedLabel(l10n)),
                         ),
                     ],
                     onChanged: _working
                         ? null
-                        : (value) => setState(() => _format = value!),
+                        : (value) => setState(() => _format = value),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -362,12 +372,20 @@ class _EditCardPageState extends State<EditCardPage> {
                     maxLines: 3,
                     minLines: 1,
                     decoration: InputDecoration(
-                      labelText: l10n.cardBarcodeValue,
+                      labelText: format == null
+                          ? l10n.cardMembershipNumber
+                          : l10n.cardBarcodeValue,
                     ),
-                    validator: (code) =>
-                        code == null || code.isEmpty || _format.accepts(code)
-                        ? null
-                        : l10n.cardBarcodeInvalid(_format.localizedLabel(l10n)),
+                    validator: (code) {
+                      if (code == null || code.isEmpty) return null;
+                      if (code.length > CardStore.maxCodeLength) {
+                        return l10n.cardBarcodeTooLong(CardStore.maxCodeLength);
+                      }
+                      if (format == null || format.accepts(code)) return null;
+                      return l10n.cardBarcodeInvalid(
+                        format.localizedLabel(l10n),
+                      );
+                    },
                   ),
                   const SizedBox(height: 22),
                   FilledButton(
@@ -438,7 +456,11 @@ class _CardPageState extends State<CardPage> {
         final l10n = AppLocalizations.of(context)!;
         return AlertDialog(
           title: Text(l10n.cardDeleteTitle),
-          content: Text(l10n.cardDeleteConfirm(_card.name)),
+          content: Text(
+            _card.photoPath == null
+                ? l10n.cardDeleteWithoutPhoto(_card.name)
+                : l10n.cardDeleteConfirm(_card.name),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -470,8 +492,7 @@ class _CardPageState extends State<CardPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  void _showPhoto() {
-    final photo = File(_card.photoPath);
+  void _showPhoto(File photo) {
     Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (context) => Scaffold(
@@ -497,6 +518,7 @@ class _CardPageState extends State<CardPage> {
     final l10n = AppLocalizations.of(context)!;
     final code = _card.code;
     final format = _card.format;
+    final photoPath = _card.photoPath;
     return PopScope(
       canPop: !_working,
       child: Scaffold(
@@ -526,8 +548,12 @@ class _CardPageState extends State<CardPage> {
                 ),
               ),
               const SizedBox(height: 16),
-              if (code != null && format != null)
-                _CheckoutCode(code: code, format: format),
+              if (code != null)
+                _CheckoutCode(
+                  code: code,
+                  format: format,
+                  hasOriginalPhoto: photoPath != null,
+                ),
               const SizedBox(height: 12),
               Builder(
                 builder: (buttonContext) => FilledButton.icon(
@@ -538,9 +564,21 @@ class _CardPageState extends State<CardPage> {
               ),
               const SizedBox(height: 8),
               OutlinedButton.icon(
-                onPressed: _showPhoto,
-                icon: const Icon(Icons.photo_outlined),
-                label: Text(l10n.cardViewOriginalPhoto),
+                onPressed: _working
+                    ? null
+                    : photoPath == null
+                    ? _edit
+                    : () => _showPhoto(File(photoPath)),
+                icon: Icon(
+                  photoPath == null
+                      ? Icons.add_a_photo_outlined
+                      : Icons.photo_outlined,
+                ),
+                label: Text(
+                  photoPath == null
+                      ? l10n.cardAddOriginalPhoto
+                      : l10n.cardViewOriginalPhoto,
+                ),
               ),
             ],
           ),
@@ -551,15 +589,22 @@ class _CardPageState extends State<CardPage> {
 }
 
 class _CheckoutCode extends StatelessWidget {
-  const _CheckoutCode({required this.code, required this.format});
+  const _CheckoutCode({
+    required this.code,
+    required this.format,
+    required this.hasOriginalPhoto,
+  });
 
   final String code;
-  final CardCodeFormat format;
+  final CardCodeFormat? format;
+  final bool hasOriginalPhoto;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final formatLabel = format.localizedLabel(l10n);
+    final format = this.format;
+    final formatLabel =
+        format?.localizedLabel(l10n) ?? l10n.cardMembershipNumber;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 16, 12, 18),
       decoration: BoxDecoration(
@@ -570,33 +615,40 @@ class _CheckoutCode extends StatelessWidget {
         children: [
           Text(formatLabel, style: const TextStyle(color: Colors.black87)),
           const SizedBox(height: 14),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final width = math.min(
-                constraints.maxWidth,
-                format.square ? 344.0 : 640.0,
-              );
-              final quietZone = width * (format.square ? .14 : .105);
-              return Semantics(
-                image: true,
-                label: l10n.scanScannable(formatLabel),
-                child: display.BarcodeWidget(
-                  barcode: format.renderer(code),
-                  data: code,
-                  width: width,
-                  height: format.square ? width : 112,
-                  padding: EdgeInsets.symmetric(
-                    horizontal: quietZone,
-                    vertical: format.square ? quietZone : 0,
+          if (format != null) ...[
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final width = math.min(
+                  constraints.maxWidth,
+                  format.square ? 344.0 : 640.0,
+                );
+                final quietZone = width * (format.square ? .14 : .105);
+                return Semantics(
+                  image: true,
+                  label: l10n.scanScannable(formatLabel),
+                  child: display.BarcodeWidget(
+                    barcode: format.renderer(code),
+                    data: code,
+                    width: width,
+                    height: format.square ? width : 112,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: quietZone,
+                      vertical: format.square ? quietZone : 0,
+                    ),
+                    drawText: false,
+                    errorBuilder: (_, _) => Center(
+                      child: Text(
+                        hasOriginalPhoto
+                            ? l10n.scanOpenOriginal
+                            : l10n.scanBarcodeUnavailable,
+                      ),
+                    ),
                   ),
-                  drawText: false,
-                  errorBuilder: (_, _) =>
-                      Center(child: Text(l10n.scanOpenOriginal)),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 14),
+                );
+              },
+            ),
+            const SizedBox(height: 14),
+          ],
           SelectableText(
             code,
             textAlign: TextAlign.center,
@@ -605,6 +657,14 @@ class _CheckoutCode extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
+          if (format == null) ...[
+            const SizedBox(height: 8),
+            Text(
+              l10n.cardBarcodeFormatPending,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.black87),
+            ),
+          ],
         ],
       ),
     );

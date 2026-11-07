@@ -34,12 +34,13 @@ class LoyaltyCard {
 
   final String id;
   final String name;
-  final String photoPath;
+  final String? photoPath;
   final String? code;
   final CardCodeFormat? format;
 }
 
 typedef _CardFields = ({String name, String? code, CardCodeFormat? format});
+typedef _CardImage = ({Uint8List bytes, String extension});
 
 class CardStore {
   CardStore(Directory root) : _root = root.absolute;
@@ -81,21 +82,26 @@ class CardStore {
   Future<LoyaltyCard> save({
     LoyaltyCard? existing,
     required String name,
-    required File photo,
+    required File? photo,
     String? code,
     CardCodeFormat? format,
   }) => _run(() async {
     final fields = _validateFields(name, code, format);
     if (existing == null) {
-      final image = await _readPhoto(photo);
+      final image = photo == null ? null : await _readPhoto(photo);
       return _createCard(fields, image);
     }
 
     final directory = _cardDirectory(existing.id);
     final previous = await _readCard(directory, existing.id);
-    if (photo.absolute.path == previous.photoPath) {
-      await _writeMetadata(directory, fields, _basename(previous.photoPath));
-      return _toCard(previous.id, fields, previous.photoPath);
+    final previousPhotoPath = previous.photoPath;
+    if (photo == null || photo.absolute.path == previousPhotoPath) {
+      _requireCardContent(fields, hasPhoto: previousPhotoPath != null);
+      final photoName = previousPhotoPath == null
+          ? null
+          : _basename(previousPhotoPath);
+      await _writeMetadata(directory, fields, photoName);
+      return _toCard(previous.id, fields, previousPhotoPath);
     }
 
     final image = await _readPhoto(photo);
@@ -106,7 +112,9 @@ class CardStore {
       await _tryDelete(newPhoto);
       rethrow;
     }
-    await _tryDelete(File(previous.photoPath));
+    if (previousPhotoPath != null) {
+      await _tryDelete(File(previousPhotoPath));
+    }
     return _toCard(previous.id, fields, newPhoto.path);
   });
 
@@ -122,19 +130,21 @@ class CardStore {
   Future<File> exportCard(LoyaltyCard card, Directory tempRoot) =>
       _run(() async {
         final current = await _readCard(_cardDirectory(card.id), card.id);
-        final image = await _readPhoto(File(current.photoPath));
+        final data = _encodeFields((
+          name: current.name,
+          code: current.code,
+          format: current.format,
+        ));
+        final photoPath = current.photoPath;
+        if (photoPath != null) {
+          final image = await _readPhoto(File(photoPath));
+          data['photoExtension'] = image.extension;
+          data['photoBase64'] = base64Encode(image.bytes);
+        }
         final directory = Directory(_join(tempRoot, 'loyalty-pocket-share'));
         await directory.create(recursive: true);
         final file = File(_join(directory, '${card.id}.loyalty-card.json'));
-        await _writeAtomically(file, {
-          ..._encodeFields((
-            name: current.name,
-            code: current.code,
-            format: current.format,
-          )),
-          'photoExtension': image.extension,
-          'photoBase64': base64Encode(image.bytes),
-        });
+        await _writeAtomically(file, data);
         return file;
       });
 
@@ -148,6 +158,10 @@ class CardStore {
     }
     final data = _decodeJson(fileBytes.takeBytes());
     final fields = _decodeFields(data);
+    if (!data.containsKey('photoBase64') &&
+        !data.containsKey('photoExtension')) {
+      return _createCard(fields, null);
+    }
     final encoded = data['photoBase64'];
     final extension = data['photoExtension'];
     if (encoded is! String ||
@@ -170,19 +184,22 @@ class CardStore {
     return result;
   }
 
-  Future<LoyaltyCard> _createCard(
-    _CardFields fields,
-    ({Uint8List bytes, String extension}) image,
-  ) async {
+  Future<LoyaltyCard> _createCard(_CardFields fields, _CardImage? image) async {
+    _requireCardContent(fields, hasPhoto: image != null);
     final time = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
     final id = '${time.padLeft(16, '0')}${_randomHex()}';
     final staging = Directory(_join(_root, '.creating-$id'));
     await staging.create(recursive: true);
     try {
-      final photo = await _writePhoto(staging, image);
-      await _writeMetadata(staging, fields, _basename(photo.path));
+      final photo = image == null ? null : await _writePhoto(staging, image);
+      final photoName = photo == null ? null : _basename(photo.path);
+      await _writeMetadata(staging, fields, photoName);
       final directory = await staging.rename(_cardDirectory(id).path);
-      return _toCard(id, fields, _join(directory, _basename(photo.path)));
+      return _toCard(
+        id,
+        fields,
+        photoName == null ? null : _join(directory, photoName),
+      );
     } catch (_) {
       await _tryDelete(staging);
       rethrow;
@@ -194,6 +211,10 @@ class CardStore {
     final data = _decodeJson(await _readLimited(metadata, 32 * 1024));
     final fields = _decodeFields(data);
     final filename = data['photo'];
+    if (filename == null && data.containsKey('photo')) {
+      _requireCardContent(fields, hasPhoto: false);
+      return _toCard(id, fields, null);
+    }
     if (filename is! String || !_photoName.hasMatch(filename)) {
       throw const FormatException('The stored card photo is invalid.');
     }
@@ -204,10 +225,7 @@ class CardStore {
     return _toCard(id, fields, photo.path);
   }
 
-  Future<File> _writePhoto(
-    Directory directory,
-    ({Uint8List bytes, String extension}) image,
-  ) async {
+  Future<File> _writePhoto(Directory directory, _CardImage image) async {
     final filename = 'photo-${_randomHex()}.${image.extension}';
     final file = File(_join(directory, filename));
     try {
@@ -221,7 +239,7 @@ class CardStore {
   Future<void> _writeMetadata(
     Directory directory,
     _CardFields fields,
-    String photoName,
+    String? photoName,
   ) => _writeAtomically(File(_join(directory, 'card.json')), {
     ..._encodeFields(fields),
     'photo': photoName,
@@ -276,11 +294,21 @@ class CardStore {
     if (trimmedName.isEmpty || trimmedName.length > maxNameLength) {
       throw const FormatException('Enter a card name of 1 to 80 characters.');
     }
-    if ((code == null) != (format == null) ||
-        (code != null && (code.isEmpty || code.length > maxCodeLength))) {
+    if (code == null
+        ? format != null
+        : code.isEmpty || code.length > maxCodeLength) {
       throw const FormatException('The barcode details are invalid.');
     }
     return (name: trimmedName, code: code, format: format);
+  }
+
+  static void _requireCardContent(
+    _CardFields fields, {
+    required bool hasPhoto,
+  }) {
+    if (!hasPhoto && fields.code == null) {
+      throw const FormatException('Add a photo or a card number.');
+    }
   }
 
   static Map<String, Object?> _decodeJson(Uint8List bytes) {
@@ -291,9 +319,7 @@ class CardStore {
     return data;
   }
 
-  static Future<({Uint8List bytes, String extension})> _readPhoto(
-    File photo,
-  ) async {
+  static Future<_CardImage> _readPhoto(File photo) async {
     final bytes = await _readLimited(photo, maxPhotoBytes);
     final preferredExtension = _basename(
       photo.path,
@@ -374,14 +400,17 @@ class CardStore {
     return Directory(_join(_root, id));
   }
 
-  static LoyaltyCard _toCard(String id, _CardFields fields, String photoPath) =>
-      LoyaltyCard(
-        id: id,
-        name: fields.name,
-        photoPath: photoPath,
-        code: fields.code,
-        format: fields.format,
-      );
+  static LoyaltyCard _toCard(
+    String id,
+    _CardFields fields,
+    String? photoPath,
+  ) => LoyaltyCard(
+    id: id,
+    name: fields.name,
+    photoPath: photoPath,
+    code: fields.code,
+    format: fields.format,
+  );
 
   String _randomHex() => List.generate(
     16,

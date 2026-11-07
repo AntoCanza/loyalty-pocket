@@ -14,11 +14,13 @@ The interface is available in English and Italian and follows your device langua
 
 To move cards from another wallet, take a screenshot of each loyalty barcode, then open **Import cards → Import photos or screenshots**. Select the images together. Loyalty Pocket looks for a barcode in each image and lets you name and review each card before saving it.
 
+If only a membership number is available, you can save it and add a photo later. The app displays the number by itself when its barcode format is unknown.
+
 ## Share a card
 
 1. Open the card and tap **Share card**.
 2. Choose **Quick Share** on Android or **AirDrop** on iPhone, where available. The shared file contains the card name, barcode value and format, and the original photo.
-3. On the receiving phone, accept the file and save it to **Downloads** or **Files** if prompted. In Loyalty Pocket, tap the import icon and choose the received `.loyalty-card.json` file.
+3. On the receiving phone, accept the file and save it to **Downloads** or **Files** if prompted. In Loyalty Pocket, tap the import icon and choose one or more received `.loyalty-card.json` files.
 
 Any file transfer method that preserves the file can also be used to move a card between Android and iPhone.
 
