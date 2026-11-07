@@ -508,24 +508,11 @@ class _CardPageState extends State<CardPage> {
                   label: const Text('Share card'),
                 ),
               ),
-              const SizedBox(height: 20),
-              Card(
-                elevation: 0,
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: _showPhoto,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _CardPhoto(photo: File(_card.photoPath), height: 190),
-                      const ListTile(
-                        leading: Icon(Icons.photo_outlined),
-                        title: Text('View original photo'),
-                        trailing: Icon(Icons.open_in_full),
-                      ),
-                    ],
-                  ),
-                ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _showPhoto,
+                icon: const Icon(Icons.photo_outlined),
+                label: const Text('View original photo'),
               ),
             ],
           ),
@@ -544,7 +531,7 @@ class _CheckoutCode extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(22, 16, 22, 18),
+      padding: const EdgeInsets.fromLTRB(12, 16, 12, 18),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -557,8 +544,9 @@ class _CheckoutCode extends StatelessWidget {
             builder: (context, constraints) {
               final width = math.min(
                 constraints.maxWidth,
-                format.square ? 296.0 : 640.0,
+                format.square ? 344.0 : 640.0,
               );
+              final quietZone = width * (format.square ? .14 : .105);
               return Semantics(
                 image: true,
                 label: 'Scannable ${format.label}',
@@ -567,6 +555,10 @@ class _CheckoutCode extends StatelessWidget {
                   data: code,
                   width: width,
                   height: format.square ? width : 112,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: quietZone,
+                    vertical: format.square ? quietZone : 0,
+                  ),
                   drawText: false,
                   errorBuilder: (_, _) => const Center(
                     child: Text('Open the original photo to scan this code.'),
