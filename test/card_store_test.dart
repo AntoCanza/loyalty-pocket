@@ -180,6 +180,48 @@ void main() {
     expect((await CardStore(wallet).load()).single.note, isNull);
   });
 
+  test('saves and shares notes at the visible character limit', () async {
+    const character = '\u{1F469}\u200D\u{1F4BB}';
+    final note = character * CardStore.maxNoteLength;
+    final saved = await store.save(name: 'Market', photo: null, code: '0007');
+
+    final updated = await store.updateNote(saved, note);
+    expect((await store.load()).single.note, note);
+
+    final shared = await store.exportCard(updated, temporary);
+    final other = CardStore(Directory.fromUri(temporary.uri.resolve('other/')));
+    expect((await other.importCard(shared.openRead())).note, note);
+
+    await expectLater(
+      store.updateNote(saved, '$note$character'),
+      throwsFormatException,
+    );
+    final oversizedCluster = 'a${'\u0301' * (20 * 1024)}';
+    await expectLater(
+      store.updateNote(saved, oversizedCluster),
+      throwsFormatException,
+    );
+    expect((await store.load()).single.note, note);
+  });
+
+  test('saves card names at the visible character limit', () async {
+    const character = '\u{1F469}\u200D\u{1F4BB}';
+    final name = character * CardStore.maxNameLength;
+    final saved = await store.save(name: name, photo: null, code: '0007');
+    expect((await store.load()).single.name, name);
+
+    await expectLater(
+      store.save(
+        existing: saved,
+        name: '$name$character',
+        photo: null,
+        code: saved.code,
+      ),
+      throwsFormatException,
+    );
+    expect((await store.load()).single.name, name);
+  });
+
   test('rejects repeated codes during queued saves and imports', () async {
     final first = store.save(
       name: 'Market',

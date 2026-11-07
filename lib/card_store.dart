@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:characters/characters.dart';
 import 'package:crypto/crypto.dart';
 
 enum CardCodeFormat {
@@ -73,8 +74,11 @@ class CardStore {
   static const maxPhotoBytes = 20 * 1024 * 1024;
 
   static const _version = 1;
+  static const _maxMetadataBytes = 32 * 1024;
+  // Leave space for the photo filename or the portable photo keys and card ID.
+  static const _maxCardFieldsBytes = _maxMetadataBytes - 128;
   static const _maxEncodedPhotoLength = ((maxPhotoBytes + 2) ~/ 3) * 4;
-  static const _maxShareBytes = _maxEncodedPhotoLength + 32 * 1024;
+  static const _maxShareBytes = _maxEncodedPhotoLength + _maxMetadataBytes;
   static final _cardId = RegExp(r'^[a-f0-9]{48}$');
   static final _photoName = RegExp(
     r'^photo-[a-f0-9]{32}\.(jpe?g|png|gif|webp|heic|heif)$',
@@ -197,12 +201,13 @@ class CardStore {
       _run(() async {
         final directory = _cardDirectory(card.id);
         final previous = await _readCard(directory, card.id);
-        return _updateMetadata(directory, previous, (
-          name: previous.name,
-          code: previous.code,
-          format: previous.format,
-          note: _validateNote(note),
-        ));
+        final fields = _validateFields(
+          previous.name,
+          previous.code,
+          previous.format,
+          note,
+        );
+        return _updateMetadata(directory, previous, fields);
       });
 
   Future<LoyaltyCard> _updateMetadata(
@@ -404,7 +409,7 @@ class CardStore {
 
   Future<LoyaltyCard> _readCard(Directory directory, String id) async {
     final metadata = File(_join(directory, 'card.json'));
-    final data = _decodeJson(await _readLimited(metadata, 32 * 1024));
+    final data = _decodeJson(await _readLimited(metadata, _maxMetadataBytes));
     final fields = _decodeFields(data);
     final filename = data['photo'];
     if (filename == null && data.containsKey('photo')) {
@@ -492,7 +497,7 @@ class CardStore {
     String? note,
   ) {
     final trimmedName = name.trim();
-    if (trimmedName.isEmpty || trimmedName.length > maxNameLength) {
+    if (trimmedName.isEmpty || !_fitsText(trimmedName, maxNameLength)) {
       throw const FormatException('Enter a card name of 1 to 80 characters.');
     }
     if (code == null
@@ -500,22 +505,30 @@ class CardStore {
         : code.isEmpty || code.length > maxCodeLength) {
       throw const FormatException('The barcode details are invalid.');
     }
-    return (
+    final fields = (
       name: trimmedName,
       code: code,
       format: format,
       note: _validateNote(note),
     );
+    if (utf8.encode(jsonEncode(_encodeFields(fields))).length >
+        _maxCardFieldsBytes) {
+      throw const FormatException('The card details are too large.');
+    }
+    return fields;
   }
 
   static String? _validateNote(String? note) {
     final trimmed = note?.trim();
     if (trimmed == null || trimmed.isEmpty) return null;
-    if (trimmed.length > maxNoteLength) {
+    if (!_fitsText(trimmed, maxNoteLength)) {
       throw const FormatException('Enter a note of up to 160 characters.');
     }
     return trimmed;
   }
+
+  static bool _fitsText(String text, int maxLength) =>
+      text.length <= _maxCardFieldsBytes && text.characters.length <= maxLength;
 
   static void _requireCardContent(
     _CardFields fields, {

@@ -89,6 +89,8 @@ Set<_ScannedCode> _readCodes(BarcodeCapture capture) {
 
 enum _PhotoHint { looking, none, found, several, differs, enter }
 
+enum EditCardExit { skippedDuplicatePhoto }
+
 Future<void> showDuplicateCardDialog(BuildContext context, LoyaltyCard card) =>
     showDuplicateCardsDialog(context, [card]);
 
@@ -168,7 +170,7 @@ class _EditCardPageState extends State<EditCardPage> {
     final photoPath = widget.card?.photoPath;
     if (photoPath != null) _photo = File(photoPath);
     final recovered = widget.recoveredPhoto;
-    if (recovered != null) _usePhoto(recovered);
+    if (recovered != null) _usePhoto(recovered, skipDuplicate: true);
   }
 
   @override
@@ -185,7 +187,7 @@ class _EditCardPageState extends State<EditCardPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  Future<void> _usePhoto(XFile photo) async {
+  Future<void> _usePhoto(XFile photo, {bool skipDuplicate = false}) async {
     final previousPhoto = _photo;
     final previousHint = _photoHint;
     setState(() => _working = true);
@@ -214,6 +216,9 @@ class _EditCardPageState extends State<EditCardPage> {
             _photoHint = previousHint;
           });
           await showDuplicateCardDialog(context, duplicate);
+          if (skipDuplicate && mounted) {
+            Navigator.of(context).pop(EditCardExit.skippedDuplicatePhoto);
+          }
           return;
         }
       }

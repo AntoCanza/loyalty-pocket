@@ -14,12 +14,18 @@ class NearbyMergeException implements Exception {
   const NearbyMergeException();
 }
 
+/// The peer rejected one card and kept the session open.
+class NearbyCardTransferException extends NearbyMergeException {
+  const NearbyCardTransferException();
+}
+
 const _protocol = 'loyalty-pocket-merge/1';
 const _pairTimeout = Duration(minutes: 2);
 const _requestTimeout = Duration(seconds: 45);
 const _maxManifest = 2 * 1024 * 1024;
 const _maxCard = 28 * 1024 * 1024;
 const _maxHandshake = 1024;
+const _maxSessions = 8;
 const _frameOverhead = 8 + 16;
 final _random = Random.secure();
 final _x25519 = X25519();
@@ -144,15 +150,25 @@ class NearbyMergeServer {
   }
 
   Future<List<int>> _hello(HttpRequest request) async {
+    final data = _readJson(await _read(request, _maxHandshake));
+    final name = _readName(data['name']);
+    final commitment = _readBase64(data['commitment'], 32);
     _expire();
-    if (_sessions.length + _pairing >= 8) {
-      throw const _HttpFailure(HttpStatus.serviceUnavailable);
+    if (_sessions.length + _pairing >= _maxSessions) {
+      // A greeting awaiting a key or a declined pairing can be replaced.
+      final abandoned = _sessions.entries
+          .where(
+            (entry) =>
+                entry.value.pair != null || entry.value.approval == false,
+          )
+          .firstOrNull;
+      if (abandoned == null) {
+        throw const _HttpFailure(HttpStatus.serviceUnavailable);
+      }
+      _sessions.remove(abandoned.key);
     }
     _pairing++;
     try {
-      final data = _readJson(await _read(request, _maxHandshake));
-      final name = _readName(data['name']);
-      final commitment = _readBase64(data['commitment'], 32);
       final pair = await _x25519.newKeyPair();
       final publicKey = (await pair.extractPublicKey()).bytes;
       final id = _randomBytes(
@@ -174,31 +190,38 @@ class NearbyMergeServer {
     final key = _readBase64(data['key'], 32);
     final salt = _readBase64(data['salt'], 32);
     final pair = session.pair;
-    if (pair == null) throw const _HttpFailure(HttpStatus.forbidden);
+    if (pair == null || _sessions[id] != session) {
+      throw const _HttpFailure(HttpStatus.forbidden);
+    }
     session.pair = null;
-    if (!_sameBytes(
-      await _commit(key, salt, session.name),
-      session.commitment,
-    )) {
-      _sessions.remove(id);
-      throw const _HttpFailure(HttpStatus.forbidden);
+    try {
+      if (!_sameBytes(
+        await _commit(key, salt, session.name),
+        session.commitment,
+      )) {
+        throw const _HttpFailure(HttpStatus.forbidden);
+      }
+      final secrets = await _derive(
+        pair: pair,
+        peerKey: key,
+        clientKey: key,
+        serverKey: session.publicKey,
+        id: id,
+        clientName: session.name,
+        serverName: _name,
+        salt: salt,
+      );
+      if (_sessions[id] != session) {
+        throw const _HttpFailure(HttpStatus.forbidden);
+      }
+      session.secrets = secrets;
+      unawaited(_approve(session, secrets.code));
+      return const [];
+    } finally {
+      if (session.secrets == null && _sessions[id] == session) {
+        _sessions.remove(id);
+      }
     }
-    final secrets = await _derive(
-      pair: pair,
-      peerKey: key,
-      clientKey: key,
-      serverKey: session.publicKey,
-      id: id,
-      clientName: session.name,
-      serverName: _name,
-      salt: salt,
-    );
-    if (_closed || _sessions[id] != session) {
-      throw const _HttpFailure(HttpStatus.forbidden);
-    }
-    session.secrets = secrets;
-    unawaited(_approve(session, secrets.code));
-    return const [];
   }
 
   Future<void> _approve(_Session session, String code) async {
@@ -298,13 +321,21 @@ class NearbyMergeServer {
     if (id.length != 48 || !_cardId.hasMatch(id)) {
       throw const FormatException();
     }
-    final card = await _store.exportForMerge(id);
-    if (card != null && card.length > _maxCard) throw const FormatException();
-    return card ?? const [];
+    try {
+      final card = await _store.exportForMerge(id);
+      return card != null && card.length <= _maxCard ? card : const [];
+    } on Exception {
+      return const [];
+    }
   }
 
   Future<List<int>> _receive(Uint8List bytes) async {
-    final imported = await _store.importForMerge(bytes);
+    final bool imported;
+    try {
+      imported = await _store.importForMerge(bytes);
+    } on Exception {
+      return const [2];
+    }
     if (imported) _onImported();
     return [imported ? 1 : 0];
   }
@@ -416,6 +447,7 @@ class NearbyMergeClient {
     }
   }
 
+  /// Returns null when the card is no longer available on the peer.
   Future<Uint8List?> downloadCard(String id) async {
     if (id.length != 48 || !_cardId.hasMatch(id)) {
       throw const NearbyMergeException();
@@ -430,8 +462,12 @@ class NearbyMergeClient {
     }
     try {
       final flag = _readFlag(await _request('write', data, 1));
-      if (flag != 0 && flag != 1) throw const FormatException();
-      return flag == 1;
+      return switch (flag) {
+        0 => false,
+        1 => true,
+        2 => throw const NearbyCardTransferException(),
+        _ => throw const NearbyMergeException(),
+      };
     } on FormatException {
       throw const NearbyMergeException();
     }

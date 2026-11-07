@@ -7,9 +7,8 @@ import 'package:nsd/nsd.dart' as nsd;
 
 import 'card_store.dart';
 import 'l10n/app_localizations.dart';
+import 'nearby_merge.dart';
 import 'nearby_transport.dart';
-
-typedef _Peer = ({String name, InternetAddress address, int port});
 
 class NearbyMergePage extends StatefulWidget {
   const NearbyMergePage({super.key, required this.store});
@@ -26,8 +25,7 @@ class _NearbyMergePageState extends State<NearbyMergePage>
 
   late final _alias = _deviceAlias();
   final _selected = <String>{};
-  final _clients = <NearbyMergeClient>{};
-  List<_Peer> _peers = [];
+  List<NearbyMergePeer> _peers = [];
   NearbyMergeServer? _server;
   nsd.Registration? _registration;
   nsd.Discovery? _discovery;
@@ -38,7 +36,9 @@ class _NearbyMergePageState extends State<NearbyMergePage>
   bool _starting = true;
   bool _discoveryFailed = false;
   DialogRoute<bool>? _pairRoute;
-  bool _merging = false;
+  NearbyMerge? _mergeOperation;
+
+  bool get _merging => _mergeOperation != null;
 
   static String _deviceAlias() {
     final id = Random.secure().nextInt(1 << 24).toRadixString(16);
@@ -63,7 +63,6 @@ class _NearbyMergePageState extends State<NearbyMergePage>
       setState(() {
         _starting = true;
         _discoveryFailed = false;
-        _merging = false;
         _peers = [];
         _selected.clear();
       });
@@ -87,11 +86,13 @@ class _NearbyMergePageState extends State<NearbyMergePage>
     _active = active;
     final generation = ++_generation;
     final pairRoute = _pairRoute;
+    final cancellation = _mergeOperation?.cancel();
+    _mergeOperation = null;
     if (!active && pairRoute != null) {
       scheduleMicrotask(() => _dismissPairRoute(pairRoute));
     }
     _networkChange = _networkChange.then((_) async {
-      await _stopNetwork();
+      await Future.wait([_stopNetwork(), ?cancellation]);
       if (_isCurrent(generation)) await _startNetwork(generation);
     });
   }
@@ -145,17 +146,14 @@ class _NearbyMergePageState extends State<NearbyMergePage>
     final discovery = _discovery;
     final registration = _registration;
     final server = _server;
-    final clients = _clients.toList();
     _discovery = null;
     _registration = null;
     _server = null;
-    _clients.clear();
     discovery?.removeListener(_refreshPeers);
     await Future.wait([
       if (discovery != null) _close(() => nsd.stopDiscovery(discovery)),
       if (registration != null) _close(() => nsd.unregister(registration)),
       if (server != null) _close(server.close),
-      for (final client in clients) _close(client.close),
     ]);
   }
 
@@ -170,7 +168,7 @@ class _NearbyMergePageState extends State<NearbyMergePage>
   void _refreshPeers() {
     final discovery = _discovery;
     if (!mounted || !_active || discovery == null) return;
-    final peers = <String, _Peer>{};
+    final peers = <String, NearbyMergePeer>{};
     for (final service in discovery.services) {
       final name = service.name;
       final port = service.port;
@@ -266,96 +264,29 @@ class _NearbyMergePageState extends State<NearbyMergePage>
         .where((peer) => _selected.contains(peer.name))
         .toList();
     if (_merging || targets.isEmpty) return;
-    setState(() => _merging = true);
-    final connected = <NearbyMergeClient>[];
-    final sessions = <NearbyMergeClient>[];
-    var received = 0;
-    var sent = 0;
-    var incomplete = false;
+    final operation = NearbyMerge(widget.store);
+    setState(() => _mergeOperation = operation);
     try {
-      final localKeys = _keys(await widget.store.mergeManifest());
-      for (final peer in targets) {
-        if (!_isCurrent(generation)) return;
-        try {
-          final client = await NearbyMergeClient.connect(
-            address: peer.address,
-            port: peer.port,
-            name: _alias,
-            confirm: (name, code) => _confirm(name, code, generation),
-          );
-          if (client == null) {
-            incomplete = true;
-            continue;
-          }
-          if (!_isCurrent(generation)) {
-            await _close(client.close);
-            return;
-          }
-          _clients.add(client);
-          connected.add(client);
-          final manifest = await client.manifest();
-          sessions.add(client);
-          for (final card in manifest) {
-            if (!_isCurrent(generation)) return;
-            if (card.keys.any(localKeys.contains)) continue;
-            final data = await client.downloadCard(card.id);
-            if (!_isCurrent(generation)) return;
-            if (data == null) {
-              incomplete = true;
-            } else if (await widget.store.importForMerge(data)) {
-              received++;
-              localKeys.addAll(card.keys);
-            }
-          }
-        } catch (_) {
-          incomplete = true;
-        }
-      }
-
-      if (!_isCurrent(generation)) return;
-      final union = await widget.store.mergeManifest();
-      for (final client in sessions) {
-        if (!_isCurrent(generation)) return;
-        try {
-          final remoteKeys = _keys(await client.manifest());
-          for (final card in union) {
-            if (!_isCurrent(generation)) return;
-            if (card.keys.any(remoteKeys.contains)) continue;
-            final data = await widget.store.exportForMerge(card.id);
-            if (!_isCurrent(generation)) return;
-            if (data == null) {
-              incomplete = true;
-              continue;
-            }
-            if (await client.sendCard(data)) sent++;
-            remoteKeys.addAll(card.keys);
-          }
-        } catch (_) {
-          incomplete = true;
-        }
-      }
-    } catch (_) {
-      incomplete = true;
+      final result = await operation.run(
+        peers: targets,
+        name: _alias,
+        confirm: (name, code) => _confirm(name, code, generation),
+      );
+      if (!mounted || !_isCurrent(generation) || result == null) return;
+      final l10n = AppLocalizations.of(context)!;
+      final message = result.connected
+          ? l10n.nearbyMergeComplete(result.sent, result.received) +
+                (result.incomplete ? '\n${l10n.nearbyMergePartial}' : '')
+          : l10n.nearbyMergeUnavailable;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } finally {
-      _clients.removeAll(connected);
-      await Future.wait(connected.map((client) => _close(client.close)));
-      if (_isCurrent(generation)) setState(() => _merging = false);
+      if (mounted && _mergeOperation == operation) {
+        setState(() => _mergeOperation = null);
+      }
     }
-
-    if (!mounted || !_isCurrent(generation)) return;
-    final l10n = AppLocalizations.of(context)!;
-    final message = sessions.isEmpty
-        ? l10n.nearbyMergeUnavailable
-        : l10n.nearbyMergeComplete(sent, received) +
-              (incomplete ? '\n${l10n.nearbyMergePartial}' : '');
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
   }
-
-  Set<String> _keys(List<MergeCardRef> manifest) => {
-    for (final card in manifest) ...card.keys,
-  };
 
   @override
   Widget build(BuildContext context) {

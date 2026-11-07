@@ -119,13 +119,13 @@ class _WalletPageState extends State<_WalletPage> {
   Future<bool> _addCard({XFile? photo}) async {
     final store = await _store;
     if (!mounted) return false;
-    final card = await Navigator.of(context).push<LoyaltyCard>(
+    final result = await Navigator.of(context).push<Object>(
       MaterialPageRoute(
         builder: (_) => EditCardPage(store: store, recoveredPhoto: photo),
       ),
     );
-    if (card != null && mounted) await _load();
-    return card != null;
+    if (result is LoyaltyCard && mounted) await _load();
+    return result != null;
   }
 
   Future<void> _reviewPhotos(List<XFile> photos) async {

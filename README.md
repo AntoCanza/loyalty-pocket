@@ -16,7 +16,7 @@ The interface is available in English and Italian and follows your device langua
 
 The appearance menu offers **Use device theme**, **Light**, and **Dark**. The app remembers your choice and displays barcodes on a white background.
 
-To move cards from another wallet, take a screenshot of each loyalty barcode, then open **Import cards → Import photos or screenshots**. Select the images together. Loyalty Pocket looks for a barcode in each image and lets you name and review each card before saving it.
+To move cards from another wallet, take a screenshot of each loyalty barcode, then open **Import cards → Import photos or screenshots**. Select the images together. Loyalty Pocket looks for a barcode in each image and lets you name and review each card before saving it. Acknowledge the duplicate notice to move on to the next photo.
 
 If only a membership number is available, you can save it and add a photo later. The app displays the number by itself when its barcode format is unknown.
 
@@ -33,6 +33,18 @@ Any file transfer method that preserves the file can also be used to move a card
 Connect the devices to the same Wi-Fi network and open **Nearby merge** on each device. On one device, select the other devices and start the merge. Check that the verification code matches before approving on both screens. The encrypted transfer takes place on the local network.
 
 Each device receives the cards it is missing and keeps its own details and photos for the cards it already has.
+
+### Verify nearby merge before a release
+
+Run `flutter test` for every change. The GitHub checks run the same suite. The merge tests run three independent wallets over real local connections. They verify pairing, missing cards, original photo bytes, conflicting local notes, repeat merges, and recovery when a single card fails to copy.
+
+Before releasing a merge change, also install the release APK on three Android emulators connected to the same virtual Wi-Fi. Use only test cards.
+
+1. On each emulator, add a card with the same barcode and a different note. Add one unique card per emulator and include an original photo on one of them.
+2. Open **Nearby merge** on all three. Select one peer, decline on that peer, and verify that both wallets still contain only their original test cards.
+3. Select both other devices from one emulator. Verify each pair shows the same code and approve on both devices.
+4. Confirm that all three wallets now have four cards, that each retained its own note on the common card, and that the transferred photo opens on another device.
+5. Repeat the merge and verify that it reports zero cards received and zero copies sent.
 
 ## Build locally
 
