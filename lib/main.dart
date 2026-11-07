@@ -241,7 +241,8 @@ class _WalletPageState extends State<_WalletPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final cards = _cards;
-    final ready = cards != null && !_loadFailed && !_importing;
+    final loadFailed = _loadFailed;
+    final ready = cards != null && !loadFailed && !_importing;
 
     return Scaffold(
       appBar: AppBar(
@@ -294,24 +295,32 @@ class _WalletPageState extends State<_WalletPage> {
         ],
       ),
       body: SafeArea(
-        child: ListView(
+        child: ListView.builder(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
-          children: [
-            if (_loadFailed)
-              ListTile(
+          itemCount: ready && cards.isNotEmpty ? cards.length : 1,
+          itemBuilder: (context, index) {
+            if (loadFailed) {
+              return ListTile(
                 title: Text(l10n.walletLoadFailed),
                 trailing: TextButton(
                   onPressed: () {
-                    _store = _openStore();
-                    _load(recoverPhoto: Platform.isAndroid);
+                    if (!_loadFailed) return;
+                    setState(() {
+                      _store = _openStore();
+                      _cards = null;
+                      _loadFailed = false;
+                    });
+                    unawaited(_load(recoverPhoto: Platform.isAndroid));
                   },
                   child: Text(l10n.retry),
                 ),
-              )
-            else if (cards == null || _importing)
-              const LinearProgressIndicator()
-            else if (cards.isEmpty)
-              Card(
+              );
+            }
+            if (!ready) {
+              return const LinearProgressIndicator();
+            }
+            if (cards.isEmpty) {
+              return Card(
                 elevation: 0,
                 child: Padding(
                   padding: const EdgeInsets.all(20),
@@ -338,63 +347,60 @@ class _WalletPageState extends State<_WalletPage> {
                     ],
                   ),
                 ),
-              )
-            else
-              for (final card in cards)
-                Card(
-                  elevation: 0,
-                  margin: const EdgeInsets.only(bottom: 8),
-                  clipBehavior: Clip.antiAlias,
-                  child: ListTile(
-                    isThreeLine: card.note != null,
-                    leading: switch (card.photoPath) {
-                      final path? => ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.file(
-                          File(path),
-                          width: 54,
-                          height: 44,
-                          fit: BoxFit.cover,
-                          cacheWidth: 160,
-                          errorBuilder: (_, _, _) =>
-                              const Icon(Icons.credit_card_outlined),
-                        ),
-                      ),
-                      null => const SizedBox(
-                        width: 54,
-                        child: Icon(Icons.credit_card_outlined),
-                      ),
-                    },
-                    title: Text(card.name),
-                    subtitle: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          card.format?.localizedLabel(l10n) ??
-                              (card.code == null
-                                  ? l10n.cardOriginalPhoto
-                                  : l10n.cardMembershipNumber),
-                        ),
-                        if (card.note case final note?)
-                          Text(
-                            note,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                      ],
+              );
+            }
+            final card = cards[index];
+            return Card(
+              key: ValueKey(card.id),
+              elevation: 0,
+              margin: const EdgeInsets.only(bottom: 8),
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                isThreeLine: card.note != null,
+                leading: switch (card.photoPath) {
+                  final path? => ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(
+                      File(path),
+                      width: 54,
+                      height: 44,
+                      fit: BoxFit.cover,
+                      cacheWidth: 160,
+                      errorBuilder: (_, _, _) =>
+                          const Icon(Icons.credit_card_outlined),
                     ),
-                    trailing: IconButton(
-                      tooltip: card.note == null
-                          ? l10n.addCardNote(card.name)
-                          : l10n.editCardNote(card.name),
-                      icon: const Icon(Icons.edit_note),
-                      onPressed: () => _editNote(card),
-                    ),
-                    onTap: () => _openCard(card),
                   ),
+                  null => const SizedBox(
+                    width: 54,
+                    child: Icon(Icons.credit_card_outlined),
+                  ),
+                },
+                title: Text(card.name),
+                subtitle: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      card.format?.localizedLabel(l10n) ??
+                          (card.code == null
+                              ? l10n.cardOriginalPhoto
+                              : l10n.cardMembershipNumber),
+                    ),
+                    if (card.note case final note?)
+                      Text(note, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
                 ),
-          ],
+                trailing: IconButton(
+                  tooltip: card.note == null
+                      ? l10n.addCardNote(card.name)
+                      : l10n.editCardNote(card.name),
+                  icon: const Icon(Icons.edit_note),
+                  onPressed: () => _editNote(card),
+                ),
+                onTap: () => _openCard(card),
+              ),
+            );
+          },
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(

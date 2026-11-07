@@ -26,6 +26,8 @@ jobs:
       - run: flutter analyze --no-pub
       - run: flutter test --no-pub
       - run: flutter build apk --release --no-pub
+      - run: ./gradlew :app:lintRelease
+        working-directory: android
 
   ios:
     runs-on: macos-15

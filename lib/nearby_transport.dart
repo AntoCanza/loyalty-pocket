@@ -300,7 +300,7 @@ class NearbyMergeServer {
   }
 
   _Session _getSession(String id) {
-    if (id.length != 32 || !_sessionId.hasMatch(id)) {
+    if (!_sessionId.hasMatch(id)) {
       throw const _HttpFailure(HttpStatus.notFound);
     }
     final session = _sessions[id];
@@ -318,7 +318,7 @@ class NearbyMergeServer {
 
   Future<List<int>> _download(List<int> bytes) async {
     final id = utf8.decode(bytes);
-    if (id.length != 48 || !_cardId.hasMatch(id)) {
+    if (!_cardId.hasMatch(id)) {
       throw const FormatException();
     }
     try {
@@ -378,7 +378,7 @@ class NearbyMergeClient {
         ),
       );
       final id = hello['id'];
-      if (id is! String || id.length != 32 || !_sessionId.hasMatch(id)) {
+      if (id is! String || !_sessionId.hasMatch(id)) {
         throw const FormatException();
       }
       final serverName = _readName(hello['name']);
@@ -449,7 +449,7 @@ class NearbyMergeClient {
 
   /// Returns null when the card is no longer available on the peer.
   Future<Uint8List?> downloadCard(String id) async {
-    if (id.length != 48 || !_cardId.hasMatch(id)) {
+    if (!_cardId.hasMatch(id)) {
       throw const NearbyMergeException();
     }
     final data = await _request('read', utf8.encode(id), _maxCard);
@@ -749,14 +749,11 @@ List<MergeCardRef> _decodeManifest(Uint8List bytes) {
   final cards = <MergeCardRef>[];
   for (final row in value) {
     if (row case {'id': final String id, 'keys': final List<Object?> keys}
-        when id.length == 48 &&
-            _cardId.hasMatch(id) &&
+        when _cardId.hasMatch(id) &&
             seen.add(id) &&
             keys.isNotEmpty &&
             keys.length <= 4 &&
-            keys.every(
-              (key) => key is String && key.length == 64 && _key.hasMatch(key),
-            )) {
+            keys.every((key) => key is String && _key.hasMatch(key))) {
       cards.add(MergeCardRef(id: id, keys: keys.cast<String>()));
     } else {
       throw const FormatException();

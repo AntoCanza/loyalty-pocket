@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +13,42 @@ const _imagePicker = MethodChannel('plugins.flutter.io/image_picker');
 const _scanner = MethodChannel('dev.steenbakker.mobile_scanner/scanner/method');
 
 void main() {
+  testWidgets('shows progress while retrying a failed wallet load', (
+    tester,
+  ) async {
+    final documents = Directory.systemTemp.createTempSync('loyalty-wallet-');
+    addTearDown(() => documents.deleteSync(recursive: true));
+    final store = CardStore(Directory('${documents.path}/cards'));
+    await tester.runAsync(
+      () => store.save(name: 'Recovered card', code: '1001', photo: null),
+    );
+
+    final available = Completer<String>();
+    var attempts = 0;
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(_pathProvider, (_) {
+      attempts++;
+      if (attempts == 1) throw PlatformException(code: 'unavailable');
+      return available.future;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(_pathProvider, null));
+
+    await tester.pumpWidget(const LoyaltyPocketApp());
+    final retry = find.text('Retry');
+    await _waitFor(tester, retry);
+    await tester.tap(retry);
+    await tester.pump();
+
+    expect(attempts, 2);
+    expect(retry, findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    available.complete(documents.path);
+    await _waitFor(tester, find.text('Recovered card'));
+    expect(attempts, 2);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
   testWidgets('skips a duplicate photo and saves the next card in a batch', (
     tester,
   ) async {

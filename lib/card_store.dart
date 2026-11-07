@@ -99,7 +99,7 @@ class CardStore {
     await _root.create(recursive: true);
     await for (final entry in _root.list(followLinks: false)) {
       final id = _basename(entry.path);
-      if (entry is! Directory || !_isCardId(id)) continue;
+      if (entry is! Directory || !_cardId.hasMatch(id)) continue;
       try {
         yield await _readCard(entry, id);
       } on FormatException {
@@ -276,7 +276,7 @@ class CardStore {
     }
     final data = _decodeJson(bytes);
     final id = data['id'];
-    if (id is! String || !_isCardId(id)) {
+    if (id is! String || !_cardId.hasMatch(id)) {
       throw const FormatException('The card ID is invalid.');
     }
     final fields = _decodeFields(data);
@@ -622,13 +622,11 @@ class CardStore {
   }
 
   Directory _cardDirectory(String id) {
-    if (!_isCardId(id)) {
+    if (!_cardId.hasMatch(id)) {
       throw const FormatException('The card ID is invalid.');
     }
     return Directory(_join(_root, id));
   }
-
-  static bool _isCardId(String id) => id.length == 48 && _cardId.hasMatch(id);
 
   String _newCardId() {
     final time = DateTime.now().microsecondsSinceEpoch.toRadixString(16);

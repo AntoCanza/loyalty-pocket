@@ -372,12 +372,12 @@ void main() {
       expect(await File(unchanged.photoPath!).readAsBytes(), _gif);
 
       final data = jsonDecode(utf8.decode(bytes)) as Map<String, Object?>;
-      await expectLater(
-        receiver.importForMerge(
-          utf8.encode(jsonEncode({...data, 'id': '../outside'})),
-        ),
-        throwsFormatException,
-      );
+      for (final id in ['../outside', '${source.id}\n']) {
+        await expectLater(
+          receiver.importForMerge(utf8.encode(jsonEncode({...data, 'id': id}))),
+          throwsFormatException,
+        );
+      }
       expect(await receiver.load(), hasLength(1));
     },
   );
