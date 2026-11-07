@@ -1,0 +1,32 @@
+# Loyalty Pocket
+
+Loyalty Pocket is an offline wallet for supermarket, retail, and other loyalty cards. It keeps the original card photo and can display a separate, high-contrast barcode for checkout.
+
+## Add and use a card
+
+1. Tap **Add card**, then **Take photo** or **Choose photo**. Capture the side with the barcode if you want the app to detect it automatically.
+2. Give the card a name. If the photo scan misses the barcode, tap **Scan barcode** or enter the value and select its format. You can also save a photo-only card.
+3. Open the saved card at checkout. The barcode appears at the top of the screen. Tap **View original photo** to see the full image and pinch to zoom.
+
+The app raises display brightness to maximum while it is active. Your regular brightness returns when you leave it. Cards and photos are stored in the app's local storage.
+
+## Share a card
+
+1. Open the card and tap **Share card**.
+2. Choose **Quick Share** on Android or **AirDrop** on iPhone, where available. The shared file contains the card name, barcode value and format, and the original photo.
+3. On the receiving phone, accept the file and save it to **Downloads** or **Files** if prompted. In Loyalty Pocket, tap the import icon and choose the received `.loyalty-card.json` file.
+
+Any file transfer method that preserves the file can also be used to move a card between Android and iPhone.
+
+## Build locally
+
+Use Flutter 3.35.2 and Dart 3.9. Android requires JDK 17 and Android SDK 36. iPhone builds require macOS and Xcode. The app targets Android 7.0 or later and iOS 13 or later.
+
+```sh
+flutter pub get
+flutter analyze
+flutter test
+flutter run
+```
+
+Run `flutter build apk --release` to produce an Android preview APK. The preview uses Flutter's default debug signing key. A store build needs its own signing configuration.
