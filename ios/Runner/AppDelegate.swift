@@ -13,20 +13,20 @@ import UIKit
     GeneratedPluginRegistrant.register(with: self)
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(raiseBrightness),
+      selector: #selector(raiseBrightness(_:)),
       name: UIApplication.didBecomeActiveNotification,
       object: application
     )
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(restoreBrightness),
+      selector: #selector(restoreBrightness(_:)),
       name: UIApplication.willResignActiveNotification,
       object: application
     )
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
-  @objc private func raiseBrightness() {
+  @objc private func raiseBrightness(_ notification: Notification) {
     guard originalBrightness == nil else { return }
     let screen = window?.windowScene?.screen ?? UIScreen.main
     originalBrightness = screen.brightness
@@ -34,7 +34,7 @@ import UIKit
     screen.brightness = 1
   }
 
-  @objc private func restoreBrightness() {
+  @objc private func restoreBrightness(_ notification: Notification) {
     if let originalBrightness {
       brightenedScreen?.brightness = originalBrightness
     }

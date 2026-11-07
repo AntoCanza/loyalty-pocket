@@ -13,11 +13,15 @@ import 'card_store.dart';
 typedef _ScannedCode = ({String value, CardCodeFormat format});
 
 extension on CardCodeFormat {
-  display.Barcode get renderer => switch (this) {
+  static final _codabarWithGuards = RegExp(r'^[ABCDENT*].+[ABCDENT*]$');
+
+  display.Barcode renderer(String value) => switch (this) {
     CardCodeFormat.code128 => display.Barcode.code128(),
     CardCodeFormat.code39 => display.Barcode.code39(),
     CardCodeFormat.code93 => display.Barcode.code93(),
-    CardCodeFormat.codabar => display.Barcode.codabar(),
+    CardCodeFormat.codabar => display.Barcode.codabar(
+      explicitStartStop: _codabarWithGuards.hasMatch(value),
+    ),
     CardCodeFormat.ean13 => display.Barcode.ean13(),
     CardCodeFormat.ean8 => display.Barcode.ean8(),
     CardCodeFormat.upcA => display.Barcode.upcA(),
@@ -37,7 +41,7 @@ extension on CardCodeFormat {
   bool accepts(String value) {
     if (value.isEmpty || value.length > CardStore.maxCodeLength) return false;
     try {
-      renderer.verify(value);
+      renderer(value).verify(value);
       return true;
     } catch (_) {
       return false;
@@ -559,7 +563,7 @@ class _CheckoutCode extends StatelessWidget {
                 image: true,
                 label: 'Scannable ${format.label}',
                 child: display.BarcodeWidget(
-                  barcode: format.renderer,
+                  barcode: format.renderer(code),
                   data: code,
                   width: width,
                   height: format.square ? width : 112,
