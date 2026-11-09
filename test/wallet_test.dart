@@ -324,7 +324,9 @@ void main() {
 }
 
 Future<void> _waitFor(WidgetTester tester, Finder finder) async {
-  for (var attempt = 0; attempt < 50; attempt++) {
+  // Wallet file operations run in real time, outside the widget test clock.
+  final elapsed = Stopwatch()..start();
+  while (elapsed.elapsed < const Duration(seconds: 5)) {
     await tester.pump(const Duration(milliseconds: 100));
     if (finder.evaluate().isNotEmpty) return;
     await tester.runAsync(
