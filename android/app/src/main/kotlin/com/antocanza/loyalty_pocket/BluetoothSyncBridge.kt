@@ -1,7 +1,10 @@
 package com.antocanza.loyalty_pocket
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -26,8 +29,12 @@ internal class BluetoothSyncBridge(
     private val keyWorker = Executors.newSingleThreadExecutor()
     private val serviceIntent = Intent(activity, BluetoothSyncService::class.java)
     private val startResults = mutableListOf<MethodChannel.Result>()
-    private val startTimeout = Runnable { finishStart("unavailable") }
+    private val startTimeout = Runnable { finishStart(serviceFailureStatus) }
     private var requestingPermissions = false
+    private var requestingRadio = false
+    private var explicitSyncRequested = false
+    private var keepAliveRequested = false
+    private var serviceFailureStatus = "unavailable"
     private var bound = false
     private var service: BluetoothSyncService? = null
 
@@ -37,7 +44,12 @@ internal class BluetoothSyncBridge(
 
     private fun onCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "start" -> start(call.argument<Boolean>("prompt") == true, result)
+            "start" -> start(
+                prompt = call.argument<Boolean>("prompt") == true,
+                enableRadio = call.argument<Boolean>("enableRadio") == true,
+                keepAlive = call.argument<Boolean>("keepAlive") == true,
+                result = result,
+            )
             "stop" -> {
                 stop()
                 result.success(null)
@@ -88,31 +100,36 @@ internal class BluetoothSyncBridge(
         }
     }
 
-    private fun start(prompt: Boolean, result: MethodChannel.Result) {
-        if (!activity.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
+    private fun start(prompt: Boolean, enableRadio: Boolean, keepAlive: Boolean, result: MethodChannel.Result) {
+        val hasBluetooth = supportsBluetooth(activity)
+        if (!hasBluetooth && !keepAlive) {
             result.success("unavailable")
             return
         }
-        val missing = requiredPermissions.filterNot { hasPermission(activity, it) }
-        if (missing.isNotEmpty() && !prompt && !requestingPermissions) {
+        val missing = if (hasBluetooth) requiredPermissions.filterNot { hasPermission(activity, it) } else emptyList()
+        if (missing.isNotEmpty() && !prompt && !keepAlive && !requestingPermissions) {
             result.success("permissionDenied")
             return
         }
         startResults.add(result)
-        if (requestingPermissions) return
-        val requested = missing.toMutableList()
+        explicitSyncRequested = explicitSyncRequested || (prompt && enableRadio)
+        keepAliveRequested = keepAliveRequested || keepAlive
+        if (requestingPermissions || requestingRadio) return
+        val requested = if (prompt) missing.toMutableList() else mutableListOf()
         if (prompt && Build.VERSION.SDK_INT >= 33 && !hasPermission(activity, Manifest.permission.POST_NOTIFICATIONS)) {
             requested.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         if (requested.isEmpty()) {
-            launchService()
+            continueStart()
         } else {
+            main.removeCallbacks(startTimeout)
             requestingPermissions = true
             try {
                 activity.requestPermissions(requested.toTypedArray(), PERMISSION_REQUEST)
             } catch (_: RuntimeException) {
                 requestingPermissions = false
-                finishStart("unavailable")
+                if (keepAliveRequested) continueStart()
+                else finishStart("unavailable")
             }
         }
     }
@@ -121,18 +138,69 @@ internal class BluetoothSyncBridge(
         if (requestCode != PERMISSION_REQUEST) return
         requestingPermissions = false
         if (startResults.isEmpty()) return
-        if (hasBluetoothPermissions(activity)) launchService()
-        else finishStart("permissionDenied")
+        continueStart()
     }
 
-    private fun launchService() {
+    @SuppressLint("MissingPermission") // Bluetooth permissions are checked before using the adapter.
+    @Suppress("DEPRECATION") // FlutterActivity exposes results via onActivityResult.
+    private fun continueStart() {
+        if (!supportsBluetooth(activity)) {
+            startWithoutBluetooth("unavailable")
+            return
+        }
+        if (!hasBluetoothPermissions(activity)) {
+            startWithoutBluetooth("permissionDenied")
+            return
+        }
+        if (!explicitSyncRequested) {
+            launchService()
+            return
+        }
+        try {
+            val adapter = activity.getSystemService(BluetoothManager::class.java)?.adapter
+            when {
+                adapter == null -> startWithoutBluetooth("unavailable")
+                adapter.isEnabled -> launchService()
+                else -> {
+                    main.removeCallbacks(startTimeout)
+                    requestingRadio = true
+                    activity.startActivityForResult(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), RADIO_REQUEST)
+                }
+            }
+        } catch (_: SecurityException) {
+            requestingRadio = false
+            startWithoutBluetooth("permissionDenied")
+        } catch (_: RuntimeException) {
+            requestingRadio = false
+            startWithoutBluetooth("unavailable")
+        }
+    }
+
+    fun onActivityResult(requestCode: Int, resultCode: Int) {
+        if (requestCode != RADIO_REQUEST || !requestingRadio) return
+        requestingRadio = false
+        if (startResults.isEmpty()) return
+        if (resultCode == Activity.RESULT_OK) launchService()
+        else startWithoutBluetooth("bluetoothOff")
+    }
+
+    private fun startWithoutBluetooth(status: String) {
+        if (keepAliveRequested) launchService(failureStatus = status)
+        else finishStart(status)
+    }
+
+    private fun launchService(failureStatus: String = "unavailable") {
+        serviceFailureStatus = failureStatus
         service?.let {
-            it.refresh()
-            it.status?.let(::finishStart)
+            it.refresh(expediteDiscovery = explicitSyncRequested)
+            it.status?.let(::finishServiceStart)
             if (it.status == null) armStartTimeout()
             return
         }
-        if (bound) return
+        if (bound) {
+            armStartTimeout()
+            return
+        }
         try {
             if (Build.VERSION.SDK_INT >= 26) activity.startForegroundService(serviceIntent)
             else activity.startService(serviceIntent)
@@ -143,7 +211,7 @@ internal class BluetoothSyncBridge(
         if (bound) armStartTimeout()
         else {
             activity.stopService(serviceIntent)
-            finishStart("unavailable")
+            finishStart(failureStatus)
         }
     }
 
@@ -157,10 +225,10 @@ internal class BluetoothSyncBridge(
         val connectedService = (binder as BluetoothSyncService.LocalBinder).service
         service = connectedService
         connectedService.attach { method, arguments ->
-            if (method == "status") finishStart(arguments as String)
-            channel.invokeMethod(method, arguments)
+            val value = if (method == "status") finishServiceStart(arguments as String) else arguments
+            channel.invokeMethod(method, value)
         }
-        connectedService.status?.let(::finishStart)
+        connectedService.status?.let(::finishServiceStart)
     }
 
     override fun onServiceDisconnected(name: ComponentName) = lostService()
@@ -176,9 +244,18 @@ internal class BluetoothSyncBridge(
 
     private fun finishStart(status: String) {
         main.removeCallbacks(startTimeout)
+        explicitSyncRequested = false
+        keepAliveRequested = false
+        serviceFailureStatus = "unavailable"
         val requests = startResults.toList()
         startResults.clear()
         requests.forEach { it.success(status) }
+    }
+
+    private fun finishServiceStart(status: String): String {
+        val reported = if (status == "unavailable") serviceFailureStatus else status
+        if (!requestingPermissions && !requestingRadio) finishStart(reported)
+        return reported
     }
 
     private fun stop() {
@@ -200,6 +277,7 @@ internal class BluetoothSyncBridge(
 
     companion object {
         private const val PERMISSION_REQUEST = 18392
+        private const val RADIO_REQUEST = 18393
 
         private val requiredPermissions: List<String>
             get() = if (Build.VERSION.SDK_INT >= 31) {
@@ -211,6 +289,9 @@ internal class BluetoothSyncBridge(
 
         private fun hasPermission(context: Context, permission: String): Boolean =
             context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
+        fun supportsBluetooth(context: Context): Boolean =
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
 
         fun hasBluetoothPermissions(context: Context): Boolean =
             requiredPermissions.all { hasPermission(context, it) }

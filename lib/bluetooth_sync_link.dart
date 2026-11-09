@@ -3,8 +3,12 @@ import 'dart:typed_data';
 
 import 'bluetooth_sync_protocol.dart';
 
+abstract interface class NearbySyncLink implements BluetoothSyncLink {
+  void close();
+}
+
 /// Transports one length-prefixed protocol frame across acknowledged BLE packets.
-class BluetoothPacketLink implements BluetoothSyncLink {
+class BluetoothPacketLink implements NearbySyncLink {
   BluetoothPacketLink({
     required this.central,
     required int maxPacketBytes,
@@ -93,6 +97,7 @@ class BluetoothPacketLink implements BluetoothSyncLink {
     unawaited(_incoming.close());
   }
 
+  @override
   void close() {
     if (_closed) return;
     _closed = true;

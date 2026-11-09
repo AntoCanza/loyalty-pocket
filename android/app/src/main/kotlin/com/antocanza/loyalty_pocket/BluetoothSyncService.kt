@@ -29,16 +29,13 @@ internal class BluetoothSyncService : Service() {
     private var listener: ((String, Any) -> Unit)? = null
     private var transport: BluetoothSyncTransport? = null
     private var foreground = false
+    private var foregroundWithLocation = false
 
     private val radioState = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
-                    BluetoothAdapter.STATE_ON -> refresh()
-                    BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> {
-                        closeTransport()
-                        updateStatus("bluetoothOff")
-                    }
+                    BluetoothAdapter.STATE_ON, BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> refresh()
                 }
                 LocationManager.MODE_CHANGED_ACTION -> refresh()
             }
@@ -58,15 +55,9 @@ internal class BluetoothSyncService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
             if (!foreground) {
-                val notification = notification()
-                if (Build.VERSION.SDK_INT >= 29) {
-                    var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                    if (Build.VERSION.SDK_INT < 31) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-                    startForeground(NOTIFICATION_ID, notification, type)
-                } else {
-                    startForeground(NOTIFICATION_ID, notification)
-                }
-                foreground = true
+                val withLocation = Build.VERSION.SDK_INT in 29..30 &&
+                    BluetoothSyncBridge.supportsBluetooth(this) && BluetoothSyncBridge.hasBluetoothPermissions(this)
+                enterForeground(withLocation)
             }
             refresh()
         } catch (_: RuntimeException) {
@@ -85,13 +76,13 @@ internal class BluetoothSyncService : Service() {
     }
 
     @SuppressLint("MissingPermission")
-    fun refresh() {
+    fun refresh(expediteDiscovery: Boolean = false) {
         if (!foreground) return
         val manager = getSystemService(BluetoothManager::class.java)
         val adapter = manager?.adapter
         val blocked = when {
+            !BluetoothSyncBridge.supportsBluetooth(this) || adapter == null -> "unavailable"
             !BluetoothSyncBridge.hasBluetoothPermissions(this) -> "permissionDenied"
-            adapter == null -> "unavailable"
             !adapter.isEnabled -> "bluetoothOff"
             Build.VERSION.SDK_INT < 31 && !locationEnabled() -> "unavailable"
             else -> null
@@ -101,7 +92,20 @@ internal class BluetoothSyncService : Service() {
             updateStatus(blocked ?: "unavailable")
             return
         }
-        if (transport?.active == true) return
+        val current = transport
+        if (current?.active == true) {
+            if (expediteDiscovery) current.refreshDiscovery()
+            return
+        }
+        // A service started for Wi-Fi may have gained legacy BLE permissions since then.
+        if (Build.VERSION.SDK_INT in 29..30 && !foregroundWithLocation) {
+            try {
+                enterForeground(withLocation = true)
+            } catch (_: RuntimeException) {
+                updateStatus("unavailable")
+                return
+            }
+        }
         status = null
         val next = BluetoothSyncTransport(this, manager, adapter, ::updateStatus) { method, arguments ->
             listener?.invoke(method, arguments)
@@ -150,6 +154,19 @@ internal class BluetoothSyncService : Service() {
     } else {
         Settings.Secure.getInt(contentResolver, Settings.Secure.LOCATION_MODE, Settings.Secure.LOCATION_MODE_OFF) !=
             Settings.Secure.LOCATION_MODE_OFF
+    }
+
+    private fun enterForeground(withLocation: Boolean) {
+        val notification = notification()
+        if (Build.VERSION.SDK_INT >= 29) {
+            val connectedDevice = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            val type = if (withLocation) connectedDevice or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else connectedDevice
+            startForeground(NOTIFICATION_ID, notification, type)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+        foreground = true
+        foregroundWithLocation = withLocation
     }
 
     @Suppress("DEPRECATION")

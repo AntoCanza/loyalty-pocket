@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'bluetooth_sync_link.dart';
 import 'bluetooth_sync_protocol.dart';
 import 'card_store.dart';
+import 'wifi_sync_transport.dart';
 
 enum BluetoothSyncStatus {
   disabled,
@@ -39,6 +40,7 @@ class BluetoothSync extends ChangeNotifier {
   static const _channel = MethodChannel('loyalty_pocket/bluetooth_sync');
   static const _invitePrefix = 'loyaltypocket:bluetooth:1:';
   static const _inviteLifetime = Duration(minutes: 5);
+  static const _manualDiscoveryWindow = Duration(seconds: 45);
   static const _historyLimit = 20;
   static final _random = Random.secure();
 
@@ -48,13 +50,31 @@ class BluetoothSync extends ChangeNotifier {
   final _devices = <String, String>{};
   final _history = <BluetoothSyncEntry>[];
   final _links = <String, BluetoothPacketLink>{};
-  final _peerLinks = <String, BluetoothPacketLink>{};
-  final _superseded = <BluetoothPacketLink>{};
+  final _peerLinks = <String, NearbySyncLink>{};
+  final _superseded = <NearbySyncLink>{};
+  late final _wifi = WifiSyncTransport(
+    onLink: (link) {
+      if (_acceptNewLinks && !_disposed) {
+        unawaited(_session(link));
+      } else {
+        link.close();
+      }
+    },
+    onAvailabilityChanged: (ready) {
+      _wifiReady = ready;
+      _changed();
+    },
+  );
   Future<void> _writes = Future.value();
   Future<void> _actions = Future.value();
   bool _disposed = false;
   bool _enabled = false;
   bool _initializing = true;
+  bool _wifiReady = false;
+  bool _manualActive = false;
+  bool _manualDiscovering = false;
+  bool _manualFoundPeer = false;
+  bool _manualNoPeers = false;
   int _epoch = 0;
   var _status = BluetoothSyncStatus.disabled;
   late String _deviceId;
@@ -66,6 +86,7 @@ class BluetoothSync extends ChangeNotifier {
   DateTime? _joinExpiry;
   Timer? _inviteTimer;
   Timer? _joinTimer;
+  Timer? _manualTimer;
 
   bool get supported => Platform.isAndroid || Platform.isIOS;
   bool get initializing => _initializing;
@@ -73,13 +94,19 @@ class BluetoothSync extends ChangeNotifier {
   bool get enabled => _enabled;
   bool get joining => _joinKey != null;
   bool get syncing => _peerLinks.isNotEmpty;
+  bool get wifiReady => _wifiReady;
+  bool get manualSyncActive => _manualActive;
+  bool get manualSyncNoPeers => _manualNoPeers;
   String get deviceName => _deviceName;
   BluetoothSyncStatus get status => _status;
   String? get invitation =>
       _isLive(_inviteExpiry) ? '$_invitePrefix${_encode(_inviteKey!)}' : null;
   List<String> get devices => List.unmodifiable(_devices.values);
   List<BluetoothSyncEntry> get history => List.unmodifiable(_history);
-  bool get _shouldRun => _enabled || joining;
+  bool get _shouldRun => _enabled || joining || _manualActive;
+  bool get _acceptNewLinks => _enabled || joining || _manualDiscovering;
+  bool get _transportReady =>
+      _wifiReady || _status == BluetoothSyncStatus.ready;
 
   Future<void> initialize() async {
     _deviceId = _encode(_randomBytes(16));
@@ -110,10 +137,46 @@ class BluetoothSync extends ChangeNotifier {
   }
 
   Future<void> resume() => _act(() async {
-    if (!_initializing && _shouldRun && _status != BluetoothSyncStatus.ready) {
+    if (!_initializing &&
+        _shouldRun &&
+        (!_wifiReady || _status != BluetoothSyncStatus.ready)) {
       await _start(prompt: false);
     }
   });
+
+  Future<void> syncNow() => _act(() async {
+    if (!hasGroup || _manualActive || _disposed) return;
+    _manualActive = true;
+    _manualDiscovering = true;
+    _manualFoundPeer = syncing;
+    _manualNoPeers = false;
+    _changed();
+    await _start(prompt: true, enableRadio: true);
+    if (_disposed) return;
+    _manualTimer = Timer(_manualDiscoveryWindow, () {
+      unawaited(
+        _act(() async {
+          _manualDiscovering = false;
+          await _finishManualSync();
+        }),
+      );
+    });
+  });
+
+  Future<void> _finishManualSync() async {
+    if (!_manualActive || _manualDiscovering || syncing) return;
+    _manualActive = false;
+    _manualNoPeers = !_manualFoundPeer;
+    if (!_shouldRun) await _stop();
+    _changed();
+  }
+
+  void _resetManualSync() {
+    _manualTimer?.cancel();
+    _manualActive = false;
+    _manualDiscovering = false;
+    _manualNoPeers = false;
+  }
 
   Future<void> rename(String name) => _act(() async {
     final trimmed = name.trim();
@@ -131,6 +194,7 @@ class BluetoothSync extends ChangeNotifier {
       await _start(prompt: true);
     } else {
       _clearInvite();
+      _resetManualSync();
       await _stop();
       await _save();
     }
@@ -146,7 +210,7 @@ class BluetoothSync extends ChangeNotifier {
     _enabled = true;
     await _save();
     await _start(prompt: true);
-    if (_status != BluetoothSyncStatus.ready) return null;
+    if (!_transportReady) return null;
     _clearInvite();
     _inviteKey = _randomBytes(32);
     _inviteExpiry = DateTime.now().add(_inviteLifetime);
@@ -169,7 +233,7 @@ class BluetoothSync extends ChangeNotifier {
     _joinTimer?.cancel();
     _joinTimer = Timer(_inviteLifetime, () => unawaited(cancelJoin()));
     await _start(prompt: true);
-    if (_status != BluetoothSyncStatus.ready) {
+    if (!_transportReady) {
       final failure = _status;
       _clearJoin();
       await _stop();
@@ -188,6 +252,7 @@ class BluetoothSync extends ChangeNotifier {
 
   Future<void> leave() => _act(() async {
     _enabled = false;
+    _resetManualSync();
     _clearInvite();
     _clearJoin();
     await _stop();
@@ -199,20 +264,37 @@ class BluetoothSync extends ChangeNotifier {
     _changed();
   });
 
-  Future<void> _start({required bool prompt}) async {
+  Future<void> _start({required bool prompt, bool enableRadio = false}) async {
     if (!supported || _disposed) {
       _status = BluetoothSyncStatus.unavailable;
-    } else {
+      _changed();
+      return;
+    }
+    final wifi = _startWifi(refresh: enableRadio);
+    if (_status != BluetoothSyncStatus.ready || enableRadio) {
       _status = BluetoothSyncStatus.starting;
       _changed();
       try {
         final value = await _channel.invokeMethod<String>('start', {
           'prompt': prompt,
+          'enableRadio': enableRadio,
+          'keepAlive': true,
         });
         _status = _statusFromNative(value);
       } on Exception {
         _status = BluetoothSyncStatus.unavailable;
       }
+    }
+    await wifi;
+    _changed();
+  }
+
+  Future<void> _startWifi({required bool refresh}) async {
+    try {
+      _wifiReady = await _wifi.start();
+      if (refresh && !_disposed) _wifi.syncNow();
+    } on Exception {
+      _wifiReady = false;
     }
     _changed();
   }
@@ -226,12 +308,15 @@ class BluetoothSync extends ChangeNotifier {
     _peerLinks.clear();
     _superseded.clear();
     if (supported) {
+      final wifi = _wifi.stop();
       try {
         await _channel.invokeMethod<void>('stop');
       } on Exception {
         // The platform may have stopped already.
       }
+      await wifi;
     }
+    _wifiReady = false;
     _status = BluetoothSyncStatus.disabled;
     _changed();
   }
@@ -251,7 +336,10 @@ class BluetoothSync extends ChangeNotifier {
         if (_links.containsKey(id)) return;
         final central = args['central'];
         final maxPacketBytes = args['maxPacketBytes'];
-        if (central is! bool || maxPacketBytes is! int || _links.length >= 4) {
+        if (!_acceptNewLinks ||
+            central is! bool ||
+            maxPacketBytes is! int ||
+            _links.length >= 4) {
           await _disconnect(id);
           return;
         }
@@ -262,7 +350,7 @@ class BluetoothSync extends ChangeNotifier {
               _channel.invokeMethod<void>('send', {'id': id, 'bytes': bytes}),
         );
         _links[id] = link;
-        unawaited(_session(id, link));
+        unawaited(_session(link, bluetoothId: id));
       case 'bytesReceived':
         final bytes = args['bytes'];
         final link = _links[id];
@@ -275,7 +363,7 @@ class BluetoothSync extends ChangeNotifier {
     }
   }
 
-  Future<void> _session(String id, BluetoothPacketLink link) async {
+  Future<void> _session(NearbySyncLink link, {String? bluetoothId}) async {
     final epoch = _epoch;
     final local = BluetoothSyncPeer(id: _deviceId, name: _deviceName);
     final offer = _isLive(_inviteExpiry) ? _inviteKey : null;
@@ -320,11 +408,18 @@ class BluetoothSync extends ChangeNotifier {
             return;
           }
           peer = remote;
+          if (_manualActive) _manualFoundPeer = true;
+          _manualNoPeers = false;
           final other = _peerLinks[remote.id];
           if (other != null) {
             final preferCentral = local.id.compareTo(remote.id) < 0;
-            if (link.central != preferCentral ||
-                other.central == preferCentral) {
+            final thisIsWifi = link is WifiSyncLink;
+            final otherIsWifi = other is WifiSyncLink;
+            final preferNew = thisIsWifi != otherIsWifi
+                ? thisIsWifi
+                : link.central == preferCentral &&
+                      other.central != preferCentral;
+            if (!preferNew) {
               _superseded.add(link);
               link.close();
               return;
@@ -341,13 +436,16 @@ class BluetoothSync extends ChangeNotifier {
       // A radio can disconnect at any time. Already imported cards stay saved.
     } finally {
       link.close();
-      if (_links[id] == link) {
-        _links.remove(id);
-        await _disconnect(id);
+      if (bluetoothId != null && _links[bluetoothId] == link) {
+        _links.remove(bluetoothId);
+        await _disconnect(bluetoothId);
       }
       if (_peerLinks[peer?.id] == link) {
         _peerLinks.remove(peer?.id);
         _changed();
+      }
+      if (_manualActive && !_manualDiscovering) {
+        unawaited(_act(_finishManualSync));
       }
     }
     final superseded = _superseded.remove(link);
@@ -514,6 +612,7 @@ class BluetoothSync extends ChangeNotifier {
     _disposed = true;
     _inviteTimer?.cancel();
     _joinTimer?.cancel();
+    _manualTimer?.cancel();
     if (supported) _channel.setMethodCallHandler(null);
     unawaited(_stop());
     super.dispose();

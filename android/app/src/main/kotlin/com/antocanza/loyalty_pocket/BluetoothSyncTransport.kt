@@ -54,11 +54,13 @@ internal class BluetoothSyncTransport(
     }
 
     private class PendingPacket(val timeout: Runnable, val complete: (String?) -> Unit)
+    private class Sighting(val device: BluetoothDevice, val seenAtNanos: Long)
 
     private val main = Handler(Looper.getMainLooper())
     private val links = mutableMapOf<String, Link>()
     private val peripheralMtus = mutableMapOf<String, Int>()
     private val retryAfter = linkedMapOf<String, Long>()
+    private val nearby = linkedMapOf<String, Sighting>()
     private val startupTimeout = Runnable { fail() }
     private var scanner: BluetoothLeScanner? = null
     private var advertiser: BluetoothLeAdvertiser? = null
@@ -87,7 +89,14 @@ internal class BluetoothSyncTransport(
 
     private val scanResults = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            main.post { if (active) connect(result.device) }
+            main.post {
+                if (!active) return@post
+                val address = result.device.address
+                nearby.remove(address)
+                if (nearby.size >= MAX_SIGHTINGS) nearby.remove(nearby.keys.first())
+                nearby[address] = Sighting(result.device, result.timestampNanos)
+                connect(result.device)
+            }
         }
 
         override fun onScanFailed(errorCode: Int) { main.post { fail() } }
@@ -286,6 +295,14 @@ internal class BluetoothSyncTransport(
 
     fun replayPeers() = links.values.filter { it.ready }.forEach(::emitPeer)
 
+    fun refreshDiscovery() {
+        if (!active || links.isNotEmpty()) return
+        // Retry a recent advertisement without restarting the filtered scan.
+        retryAfter.keys.removeAll { it.startsWith(CENTRAL_PREFIX) }
+        val cutoff = SystemClock.elapsedRealtimeNanos() - SIGHTING_MAX_AGE_NANOS
+        nearby.values.lastOrNull { it.seenAtNanos >= cutoff }?.let { connect(it.device) }
+    }
+
     fun send(id: String, bytes: ByteArray, complete: (String?) -> Unit) {
         val link = links.values.firstOrNull { it.id == id }
         if (link?.ready != true) {
@@ -320,6 +337,7 @@ internal class BluetoothSyncTransport(
         server = null
         indication = null
         retryAfter.clear()
+        nearby.clear()
         peripheralMtus.clear()
     }
 
@@ -472,7 +490,7 @@ internal class BluetoothSyncTransport(
     }
 
     private fun linkKey(device: BluetoothDevice, central: Boolean): String =
-        (if (central) "central:" else "peripheral:") + device.address
+        (if (central) CENTRAL_PREFIX else "peripheral:") + device.address
 
     private inline fun attempt(operation: () -> Unit): Boolean = accepted {
         operation()
@@ -497,5 +515,8 @@ internal class BluetoothSyncTransport(
         private const val LINK_TIMEOUT = 15_000L
         private const val PACKET_TIMEOUT = 8_000L
         private const val MAX_COOLDOWNS = 64
+        private const val MAX_SIGHTINGS = 16
+        private const val SIGHTING_MAX_AGE_NANOS = 8_000_000_000L
+        private const val CENTRAL_PREFIX = "central:"
     }
 }

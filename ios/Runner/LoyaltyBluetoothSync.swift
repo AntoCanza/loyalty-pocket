@@ -91,7 +91,16 @@ final class LoyaltyBluetoothSync: NSObject {
         result(Self.invalidArgument)
         return
       }
-      start(prompt: prompt.boolValue, result: result)
+      var enableRadio = false
+      if let argument = arguments?["enableRadio"] {
+        guard let requested = argument as? NSNumber,
+              CFGetTypeID(requested) == CFBooleanGetTypeID() else {
+          result(Self.invalidArgument)
+          return
+        }
+        enableRadio = requested.boolValue
+      }
+      start(prompt: prompt.boolValue, enableRadio: enableRadio, result: result)
     case "stop":
       stop()
       result(nil)
@@ -131,7 +140,7 @@ final class LoyaltyBluetoothSync: NSObject {
     return centralManager?.authorization ?? peripheralManager?.authorization ?? .notDetermined
   }
 
-  private func start(prompt: Bool, result: @escaping FlutterResult) {
+  private func start(prompt: Bool, enableRadio: Bool, result: @escaping FlutterResult) {
     let permission = authorization
     guard permission != .denied, permission != .restricted,
           prompt || permission != .notDetermined else {
@@ -146,8 +155,9 @@ final class LoyaltyBluetoothSync: NSObject {
     let timeout = DispatchWorkItem { [weak self] in self?.finishStart("unavailable") }
     startTimeout = timeout
     DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: timeout)
-    createManagers()
-    ensureScan()
+    let explicitAttempt = prompt && enableRadio
+    createManagers(showPowerAlert: explicitAttempt && UIApplication.shared.applicationState == .active)
+    ensureScan(restart: explicitAttempt)
     ensureAdvertising()
     publishStatus()
     if newlyAttached {
@@ -155,11 +165,11 @@ final class LoyaltyBluetoothSync: NSObject {
     }
   }
 
-  private func createManagers() {
+  private func createManagers(showPowerAlert: Bool = false) {
     if centralManager == nil {
       centralManager = CBCentralManager(delegate: self, queue: nil, options: [
         CBCentralManagerOptionRestoreIdentifierKey: Self.centralRestoreID,
-        CBCentralManagerOptionShowPowerAlertKey: false,
+        CBCentralManagerOptionShowPowerAlertKey: showPowerAlert,
       ])
     }
     if peripheralManager == nil {
@@ -225,7 +235,7 @@ final class LoyaltyBluetoothSync: NSObject {
     guard enabled, let central = centralManager, central.state == .poweredOn else { return }
     let canScan = links.count < Self.maxLinks && links.values.filter { $0.isOutgoing }.count < Self.maxOutgoing
     if central.isScanning && (restart || !canScan) { central.stopScan() }
-    if canScan && !central.isScanning {
+    if canScan && (restart || !central.isScanning) {
       central.scanForPeripherals(withServices: [Self.serviceID], options: nil)
     }
   }

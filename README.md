@@ -32,11 +32,13 @@ Any file transfer method that preserves the file can also be used to move a card
 
 ## Merge nearby wallets
 
-Open **Nearby Sync** from the devices icon. Choose **Invite a device** on one phone and **Scan an invitation** on the other. An invitation expires after five minutes, when it is used or when you close it. After pairing, devices in the group exchange missing cards over Bluetooth as they come into range, with Wi-Fi and mobile data optional. A phone can pass cards it previously received to other group members.
+Open **Nearby Sync** from the devices icon. Choose **Invite a device** on one phone and **Scan an invitation** on the other. An invitation expires after five minutes, when it is used or when you close it. The same group can sync automatically over a shared Wi-Fi network or when the devices come within Bluetooth range. A phone can pass cards it previously received to other group members.
+
+Tap **Sync now** to look for group members immediately, even when automatic sync is off. If Bluetooth is off, Android asks you to confirm turning it on. On iPhone and iPad, turn it on in Settings if prompted. Shared Wi-Fi can carry a sync while Bluetooth is off.
 
 **Recent syncs** shows the device name, time, and numbers of cards sent and received. Each phone keeps its own details and photos for cards it already has. If a transfer breaks, the next sync skips cards that were already saved. A card deleted locally can be received again from a group member that still has it.
 
-Android shows a notification while the nearby Bluetooth service is active. On iPhone, the system controls when Bluetooth discovery runs in the background. For mixed groups the iPhone can discover the Android phone’s Bluetooth advertisement. A force-quit or a reboot may require you to open the app again.
+Android shows a notification while its background sync service is active. On iPhone and iPad, the system controls when background sync can run. For mixed groups the iPhone can discover the Android phone’s Bluetooth advertisement. A force-quit or a reboot may require you to open the app again.
 
 **Merge manually over Wi-Fi** is available on the same screen. Connect the phones to the same Wi-Fi network and open that option on each. Select the peers on one phone and approve the matching verification code.
 
@@ -56,7 +58,9 @@ Verify Bluetooth with physical Android and Apple devices and synthetic cards bef
 4. Repeat with four members and stagger their encounters so that a card crosses at least two links. Verify that common cards retain their local notes and a subsequent encounter reports the wallets are up to date.
 5. Interrupt a photo transfer by separating the phones. Bring them back together and verify that the next sync finishes the missing card without duplicating cards already saved.
 
-For Wi-Fi regressions, also install the release APK on three Android emulators connected to the same virtual Wi-Fi.
+For automatic Wi-Fi sync, pair devices on the same network, turn Bluetooth off on both and add a test card. Verify that the other device receives it without tapping **Sync now**. Turn off automatic sync on one device, add another card there, and tap **Sync now**. Verify that Wi-Fi can finish the transfer if you decline the Android Bluetooth prompt. Confirm the switch stays off after the attempt. Turn both radios on and repeat with a shared card to verify that only one copy is saved.
+
+For manual Wi-Fi regressions, also install the release APK on three Android emulators connected to the same virtual Wi-Fi.
 
 1. On each emulator, add a card with the same barcode and a different note. Add one unique card per emulator and include an original photo on one of them.
 2. Open **Nearby Sync → Merge manually over Wi-Fi** on all three. Select one peer, decline on that peer, and verify that both wallets still contain only their original test cards.

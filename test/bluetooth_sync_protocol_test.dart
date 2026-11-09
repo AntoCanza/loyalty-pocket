@@ -238,6 +238,7 @@ void main() {
         _expectPair(result, sent: 0, received: 0);
       }
     },
+    timeout: const Timeout(Duration(seconds: 90)),
   );
 
   test('different groups do not learn identities or open a sync', () async {

@@ -160,6 +160,14 @@ class _BluetoothSyncPageState extends State<BluetoothSyncPage> {
                               : (value) => _run(() => _sync.setEnabled(value)),
                         ),
                       _statusTile(l10n),
+                      if (_sync.hasGroup)
+                        FilledButton.icon(
+                          icon: const Icon(Icons.sync),
+                          label: Text(l10n.bluetoothSyncNow),
+                          onPressed: _busy || _sync.manualSyncActive
+                              ? null
+                              : () => _run(_sync.syncNow),
+                        ),
                       if (_sync.joining)
                         OutlinedButton(
                           onPressed: _busy
@@ -170,7 +178,7 @@ class _BluetoothSyncPageState extends State<BluetoothSyncPage> {
                           ),
                         )
                       else ...[
-                        FilledButton.icon(
+                        FilledButton.tonalIcon(
                           icon: const Icon(Icons.qr_code),
                           label: Text(l10n.bluetoothSyncInvite),
                           onPressed: _busy ? null : () => _run(_showInvitation),
@@ -233,33 +241,33 @@ class _BluetoothSyncPageState extends State<BluetoothSyncPage> {
 
   Widget _statusTile(AppLocalizations l10n) {
     final status = _sync.status;
-    final label = switch (status) {
-      BluetoothSyncStatus.disabled => null,
+    final radio = switch (status) {
+      BluetoothSyncStatus.disabled || BluetoothSyncStatus.ready => null,
       BluetoothSyncStatus.starting => l10n.bluetoothSyncStarting,
-      BluetoothSyncStatus.ready when _sync.joining => l10n.bluetoothSyncJoining,
-      BluetoothSyncStatus.ready when _sync.syncing => l10n.bluetoothSyncWorking,
-      BluetoothSyncStatus.ready => l10n.bluetoothSyncReady,
       BluetoothSyncStatus.permissionDenied => l10n.bluetoothSyncPermission,
-      BluetoothSyncStatus.bluetoothOff => l10n.bluetoothSyncRadioOff,
+      BluetoothSyncStatus.bluetoothOff =>
+        Platform.isIOS
+            ? l10n.bluetoothSyncIosRadioOff
+            : l10n.bluetoothSyncRadioOff,
       BluetoothSyncStatus.unavailable => l10n.bluetoothSyncUnavailable,
     };
+    final label = switch (_sync) {
+      _ when _sync.joining => l10n.bluetoothSyncJoining,
+      _ when _sync.syncing => l10n.bluetoothSyncWorking,
+      _ when _sync.manualSyncNoPeers => l10n.bluetoothSyncNoPeers,
+      _
+          when _sync.manualSyncActive ||
+              _sync.wifiReady ||
+              status == BluetoothSyncStatus.ready =>
+        l10n.bluetoothSyncReady,
+      _ => radio,
+    };
     if (label == null) return const SizedBox.shrink();
-    final canRetry =
-        _sync.enabled &&
-        status != BluetoothSyncStatus.ready &&
-        status != BluetoothSyncStatus.starting;
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: const Icon(Icons.bluetooth),
+      leading: Icon(_sync.wifiReady ? Icons.sync : Icons.bluetooth),
       title: Text(label),
-      trailing: canRetry
-          ? TextButton(
-              onPressed: _busy
-                  ? null
-                  : () => _run(() => _sync.setEnabled(true)),
-              child: Text(l10n.retry),
-            )
-          : null,
+      subtitle: radio == null || radio == label ? null : Text(radio),
     );
   }
 

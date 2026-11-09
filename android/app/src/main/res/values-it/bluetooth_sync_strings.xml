@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="bluetooth_sync_channel">Sincronizzazione carte nelle vicinanze</string>
-    <string name="bluetooth_sync_notification">Sincronizzazione carte nelle vicinanze attiva</string>
+    <string name="bluetooth_sync_channel">Sincronizzazione nelle vicinanze</string>
+    <string name="bluetooth_sync_notification">Sincronizzazione nelle vicinanze attiva</string>
 </resources>
