@@ -7,10 +7,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_theme.dart';
+import 'bluetooth_sync.dart';
+import 'bluetooth_sync_page.dart';
 import 'card_pages.dart';
 import 'card_store.dart';
 import 'l10n/app_localizations.dart';
-import 'nearby_merge_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -61,39 +62,76 @@ class _WalletPage extends StatefulWidget {
   State<_WalletPage> createState() => _WalletPageState();
 }
 
-class _WalletPageState extends State<_WalletPage> {
+class _WalletPageState extends State<_WalletPage> with WidgetsBindingObserver {
   late Future<CardStore> _store;
+  BluetoothSync? _bluetoothSync;
   List<LoyaltyCard>? _cards;
+  CardSortOrder _sortOrder = CardSortOrder.alphabetical;
+  int _loadGeneration = 0;
   bool _loadFailed = false;
   bool _importing = false;
+  bool _sorting = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _store = _openStore();
-    unawaited(_load(recoverPhoto: Platform.isAndroid));
+    unawaited(_load(initialize: true));
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_bluetoothSync?.resume());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _bluetoothSync?.dispose();
+    super.dispose();
   }
 
   Future<CardStore> _openStore() async {
     final documents = await getApplicationDocumentsDirectory();
-    return CardStore(
+    final store = CardStore(
       Directory('${documents.path}${Platform.pathSeparator}cards'),
     );
+    if (mounted) {
+      final sync = BluetoothSync(
+        store: store,
+        settings: File(
+          '${documents.path}${Platform.pathSeparator}bluetooth-sync.json',
+        ),
+        onCardsChanged: () => unawaited(_load()),
+      );
+      _bluetoothSync = sync;
+      unawaited(sync.initialize());
+    }
+    return store;
   }
 
-  Future<void> _load({bool recoverPhoto = false}) async {
+  Future<void> _load({bool initialize = false}) async {
+    final generation = ++_loadGeneration;
     try {
-      final cards = await (await _store).load();
-      if (!mounted) return;
+      final store = await _store;
+      final order = initialize ? await store.readSortOrder() : _sortOrder;
+      final cards = await store.load(order: order);
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _cards = cards;
+        _sortOrder = order;
         _loadFailed = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _loadFailed = true);
+      if (mounted && generation == _loadGeneration) {
+        setState(() => _loadFailed = true);
+      }
       return;
     }
-    if (recoverPhoto) {
+    if (initialize && Platform.isAndroid) {
       try {
         final result = await ImagePicker().retrieveLostData();
         final files = result.files;
@@ -205,13 +243,31 @@ class _WalletPageState extends State<_WalletPage> {
 
   Future<void> _openCard(LoyaltyCard card) async {
     final store = await _store;
-    if (!mounted) return;
-    await Navigator.of(context).push<void>(
+    if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
+    final details = Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => CardPage(store: store, card: card),
       ),
     );
+    // Opening a card should still work if its usage count cannot be saved.
+    unawaited(store.recordUse(card).catchError((Object _) {}));
+    await details;
     if (mounted) await _load();
+  }
+
+  Future<void> _changeSortOrder(CardSortOrder order) async {
+    if (_sorting || order == _sortOrder) return;
+    setState(() => _sorting = true);
+    try {
+      await (await _store).writeSortOrder(order);
+      if (!mounted) return;
+      _sortOrder = order;
+      await _load();
+    } catch (_) {
+      _notice((l10n) => l10n.walletSortSaveFailed);
+    } finally {
+      if (mounted) setState(() => _sorting = false);
+    }
   }
 
   Future<void> _editNote(LoyaltyCard card) async {
@@ -228,11 +284,14 @@ class _WalletPageState extends State<_WalletPage> {
     }
   }
 
-  Future<void> _openNearbyMerge() async {
+  Future<void> _openNearbySync() async {
     final store = await _store;
-    if (!mounted) return;
+    final sync = _bluetoothSync;
+    if (!mounted || sync == null) return;
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => NearbyMergePage(store: store)),
+      MaterialPageRoute(
+        builder: (_) => BluetoothSyncPage(sync: sync, store: store),
+      ),
     );
     if (mounted) await _load();
   }
@@ -265,8 +324,8 @@ class _WalletPageState extends State<_WalletPage> {
           ),
           IconButton(
             icon: const Icon(Icons.devices),
-            tooltip: l10n.nearbyMergeTitle,
-            onPressed: ready ? _openNearbyMerge : null,
+            tooltip: l10n.bluetoothSyncTitle,
+            onPressed: ready ? _openNearbySync : null,
           ),
           PopupMenuButton<_ImportKind>(
             tooltip: l10n.importCards,
@@ -297,7 +356,7 @@ class _WalletPageState extends State<_WalletPage> {
       body: SafeArea(
         child: ListView.builder(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
-          itemCount: ready && cards.isNotEmpty ? cards.length : 1,
+          itemCount: ready && cards.isNotEmpty ? cards.length + 1 : 1,
           itemBuilder: (context, index) {
             if (loadFailed) {
               return ListTile(
@@ -306,11 +365,11 @@ class _WalletPageState extends State<_WalletPage> {
                   onPressed: () {
                     if (!_loadFailed) return;
                     setState(() {
-                      _store = _openStore();
+                      if (_bluetoothSync == null) _store = _openStore();
                       _cards = null;
                       _loadFailed = false;
                     });
-                    unawaited(_load(recoverPhoto: Platform.isAndroid));
+                    unawaited(_load(initialize: true));
                   },
                   child: Text(l10n.retry),
                 ),
@@ -349,14 +408,52 @@ class _WalletPageState extends State<_WalletPage> {
                 ),
               );
             }
-            final card = cards[index];
+            if (index == 0) {
+              return Semantics(
+                button: true,
+                child: PopupMenuButton<CardSortOrder>(
+                  tooltip: l10n.walletSortCards,
+                  initialValue: _sortOrder,
+                  enabled: !_sorting,
+                  onSelected: _changeSortOrder,
+                  itemBuilder: (_) => [
+                    CheckedPopupMenuItem(
+                      value: CardSortOrder.alphabetical,
+                      checked: _sortOrder == CardSortOrder.alphabetical,
+                      child: Text(l10n.walletSortAlphabetical),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: CardSortOrder.mostUsed,
+                      checked: _sortOrder == CardSortOrder.mostUsed,
+                      child: Text(l10n.walletSortMostUsed),
+                    ),
+                  ],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 14,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        const Icon(Icons.sort, size: 20),
+                        const SizedBox(width: 8),
+                        Text(l10n.walletSortCards),
+                        const Icon(Icons.arrow_drop_down, size: 20),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+            final card = cards[index - 1];
+            final note = card.note;
             return Card(
               key: ValueKey(card.id),
               elevation: 0,
               margin: const EdgeInsets.only(bottom: 8),
               clipBehavior: Clip.antiAlias,
               child: ListTile(
-                isThreeLine: card.note != null,
                 leading: switch (card.photoPath) {
                   final path? => ClipRRect(
                     borderRadius: BorderRadius.circular(8),
@@ -376,22 +473,11 @@ class _WalletPageState extends State<_WalletPage> {
                   ),
                 },
                 title: Text(card.name),
-                subtitle: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      card.format?.localizedLabel(l10n) ??
-                          (card.code == null
-                              ? l10n.cardOriginalPhoto
-                              : l10n.cardMembershipNumber),
-                    ),
-                    if (card.note case final note?)
-                      Text(note, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ],
-                ),
+                subtitle: note == null
+                    ? null
+                    : Text(note, maxLines: 1, overflow: TextOverflow.ellipsis),
                 trailing: IconButton(
-                  tooltip: card.note == null
+                  tooltip: note == null
                       ? l10n.addCardNote(card.name)
                       : l10n.editCardNote(card.name),
                   icon: const Icon(Icons.edit_note),

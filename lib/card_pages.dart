@@ -8,6 +8,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'barcode_brightness.dart';
+import 'card_camera_page.dart';
 import 'card_store.dart';
 import 'l10n/app_localizations.dart';
 
@@ -157,9 +159,7 @@ class _EditCardPageState extends State<EditCardPage> {
   late final _name = TextEditingController(text: widget.card?.name);
   late final _code = TextEditingController(text: widget.card?.code);
   late final _note = TextEditingController(text: widget.card?.note);
-  late CardCodeFormat? _format = widget.card == null
-      ? CardCodeFormat.code128
-      : widget.card!.format;
+  late CardCodeFormat? _format = widget.card?.format;
   File? _photo;
   bool _working = false;
   _PhotoHint? _photoHint;
@@ -247,10 +247,15 @@ class _EditCardPageState extends State<EditCardPage> {
     }
   }
 
-  Future<void> _takePhoto(ImageSource source) async {
+  Future<void> _selectPhoto(ImageSource source) async {
     setState(() => _working = true);
     try {
-      final photo = await _picker.pickImage(source: source);
+      final photo = await switch (source) {
+        ImageSource.camera => Navigator.of(context).push<XFile>(
+          MaterialPageRoute(builder: (_) => const CardCameraPage()),
+        ),
+        ImageSource.gallery => _picker.pickImage(source: source),
+      };
       if (photo != null && mounted) await _usePhoto(photo);
     } catch (_) {
       _notice((l10n) => l10n.cardPhotoPermissionError);
@@ -377,7 +382,7 @@ class _EditCardPageState extends State<EditCardPage> {
                         FilledButton.icon(
                           onPressed: _working
                               ? null
-                              : () => _takePhoto(ImageSource.camera),
+                              : () => _selectPhoto(ImageSource.camera),
                           icon: const Icon(Icons.photo_camera_outlined),
                           label: Text(
                             photo == null
@@ -388,7 +393,7 @@ class _EditCardPageState extends State<EditCardPage> {
                         OutlinedButton.icon(
                           onPressed: _working
                               ? null
-                              : () => _takePhoto(ImageSource.gallery),
+                              : () => _selectPhoto(ImageSource.gallery),
                           icon: const Icon(Icons.photo_library_outlined),
                           label: Text(l10n.cardChoosePhoto),
                         ),
@@ -724,7 +729,7 @@ class _CheckoutCode extends StatelessWidget {
                   format.square ? 344.0 : 640.0,
                 );
                 final quietZone = width * (format.square ? .14 : .105);
-                return Semantics(
+                final barcode = Semantics(
                   image: true,
                   label: l10n.scanScannable(formatLabel),
                   child: display.BarcodeWidget(
@@ -747,6 +752,9 @@ class _CheckoutCode extends StatelessWidget {
                     ),
                   ),
                 );
+                return format.accepts(code)
+                    ? BarcodeBrightness(child: barcode)
+                    : barcode;
               },
             ),
             const SizedBox(height: 14),

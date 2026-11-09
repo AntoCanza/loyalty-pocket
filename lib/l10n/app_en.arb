@@ -1,6 +1,10 @@
 {
   "@@locale": "en",
   "walletLoadFailed": "Could not load your wallet",
+  "walletSortCards": "Sort cards",
+  "walletSortAlphabetical": "Alphabetical A–Z",
+  "walletSortMostUsed": "Most used",
+  "walletSortSaveFailed": "Could not save the sort order. Please try again.",
   "retry": "Retry",
   "noCards": "No cards yet",
   "emptyWallet": "Take a photo of a loyalty card, choose screenshots from another app, or import a shared card file.",
@@ -27,6 +31,7 @@
   "cardEditTitle": "Edit card",
   "cardOriginalPhoto": "Original photo",
   "cardTakePhoto": "Take photo",
+  "cardCaptureFailed": "Could not take the photo. Try again.",
   "cardRetakePhoto": "Retake photo",
   "cardChoosePhoto": "Choose photo",
   "cardName": "Card name",
@@ -202,5 +207,33 @@
         "type": "int"
       }
     }
-  }
+  },
+  "bluetoothSyncTitle": "Nearby Sync",
+  "bluetoothSyncIntro": "Pair once to exchange missing cards automatically over Bluetooth.",
+  "bluetoothSyncDeviceName": "This device’s name",
+  "bluetoothSyncAutomatic": "Automatic Bluetooth sync",
+  "bluetoothSyncIosHint": "iOS decides when nearby devices can be discovered in the background.",
+  "bluetoothSyncAndroidHint": "Android shows a notification while nearby sync is active.",
+  "bluetoothSyncInvite": "Invite a device",
+  "bluetoothSyncJoin": "Scan an invitation",
+  "bluetoothSyncInviteHelp": "On the other phone, open Nearby Sync and scan this one-time invitation.",
+  "bluetoothSyncInviteClosed": "This invitation has closed. Create a new one to invite another device.",
+  "bluetoothSyncScanHint": "Point your camera at the invitation on the other phone.",
+  "bluetoothSyncDevices": "Known devices",
+  "bluetoothSyncNoDevices": "No devices have joined yet.",
+  "bluetoothSyncHistory": "Recent syncs",
+  "bluetoothSyncNoHistory": "Results will appear here after the first sync.",
+  "bluetoothSyncStarting": "Starting Bluetooth…",
+  "bluetoothSyncReady": "Looking for trusted devices nearby",
+  "bluetoothSyncWorking": "Syncing cards…",
+  "bluetoothSyncJoining": "Waiting for the device that invited you…",
+  "bluetoothSyncPermission": "Allow Bluetooth and nearby device access to sync.",
+  "bluetoothSyncRadioOff": "Turn on Bluetooth to sync.",
+  "bluetoothSyncUnavailable": "Could not start Bluetooth sync.",
+  "bluetoothSyncUpToDate": "Already up to date",
+  "bluetoothSyncInterrupted": "Sync interrupted. It can resume when the devices meet again.",
+  "bluetoothSyncLeave": "Leave sync group",
+  "bluetoothSyncLeaveHelp": "This device will stop syncing with the group. All saved cards stay in your wallet.",
+  "bluetoothSyncWifi": "Merge manually over Wi-Fi",
+  "bluetoothSyncError": "Could not update Nearby Sync. Try again."
 }

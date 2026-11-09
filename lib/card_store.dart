@@ -26,6 +26,8 @@ enum CardCodeFormat {
   final String label;
 }
 
+enum CardSortOrder { alphabetical, mostUsed }
+
 class LoyaltyCard {
   const LoyaltyCard({
     required this.id,
@@ -34,6 +36,7 @@ class LoyaltyCard {
     this.code,
     this.format,
     this.note,
+    this.useCount = 0,
   });
 
   final String id;
@@ -42,6 +45,7 @@ class LoyaltyCard {
   final String? code;
   final CardCodeFormat? format;
   final String? note;
+  final int useCount;
 }
 
 class DuplicateCardException implements Exception {
@@ -78,7 +82,7 @@ class CardStore {
   // Leave space for the photo filename or the portable photo keys and card ID.
   static const _maxCardFieldsBytes = _maxMetadataBytes - 128;
   static const _maxEncodedPhotoLength = ((maxPhotoBytes + 2) ~/ 3) * 4;
-  static const _maxShareBytes = _maxEncodedPhotoLength + _maxMetadataBytes;
+  static const maxShareBytes = _maxEncodedPhotoLength + _maxMetadataBytes;
   static final _cardId = RegExp(r'^[a-f0-9]{48}$');
   static final _photoName = RegExp(
     r'^photo-[a-f0-9]{32}\.(jpe?g|png|gif|webp|heic|heif)$',
@@ -89,10 +93,42 @@ class CardStore {
   final Random _random = Random.secure();
   Future<void> _pending = Future.value();
 
-  Future<List<LoyaltyCard>> load() => _run(() async {
+  Future<List<LoyaltyCard>> load({
+    CardSortOrder order = CardSortOrder.alphabetical,
+  }) => _run(() async {
     final cards = await _readCards().toList();
-    cards.sort((a, b) => b.id.compareTo(a.id));
+    cards.sort((a, b) {
+      if (order == CardSortOrder.mostUsed) {
+        final byUse = b.useCount.compareTo(a.useCount);
+        if (byUse != 0) return byUse;
+      }
+      final byName = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      return byName == 0 ? a.id.compareTo(b.id) : byName;
+    });
     return cards;
+  });
+
+  File get _sortOrderFile => File(_join(_root, '.sort-order.json'));
+
+  Future<CardSortOrder> readSortOrder() => _run(() async {
+    try {
+      final data = _decodeJson(
+        await _readLimited(_sortOrderFile, _maxMetadataBytes),
+      );
+      if (data['order'] == CardSortOrder.mostUsed.name) {
+        return CardSortOrder.mostUsed;
+      }
+    } on FormatException {
+      // An invalid preference should not prevent opening the wallet.
+    } on FileSystemException {
+      // Existing wallets may not have a preference file yet.
+    }
+    return CardSortOrder.alphabetical;
+  });
+
+  Future<void> writeSortOrder(CardSortOrder order) => _run(() async {
+    await _root.create(recursive: true);
+    await _writeAtomically(_sortOrderFile, {'order': order.name});
   });
 
   Stream<LoyaltyCard> _readCards() async* {
@@ -186,7 +222,12 @@ class CardStore {
     final image = await _readPhoto(photo);
     final newPhoto = await _writePhoto(directory, image);
     try {
-      await _writeMetadata(directory, fields, _basename(newPhoto.path));
+      await _writeMetadata(
+        directory,
+        fields,
+        _basename(newPhoto.path),
+        useCount: previous.useCount,
+      );
     } catch (_) {
       await _tryDelete(newPhoto);
       rethrow;
@@ -194,7 +235,25 @@ class CardStore {
     if (previousPhotoPath != null) {
       await _tryDelete(File(previousPhotoPath));
     }
-    return _toCard(previous.id, fields, newPhoto.path);
+    return _toCard(
+      previous.id,
+      fields,
+      newPhoto.path,
+      useCount: previous.useCount,
+    );
+  });
+
+  Future<void> recordUse(LoyaltyCard card) => _run(() async {
+    final directory = _cardDirectory(card.id);
+    final current = await _readCard(directory, card.id);
+    final count = current.useCount + 1;
+    if (count <= current.useCount) return;
+    await _updateMetadata(
+      directory,
+      current,
+      _fieldsOf(current),
+      useCount: count,
+    );
   });
 
   Future<LoyaltyCard> updateNote(LoyaltyCard card, String? note) =>
@@ -213,15 +272,18 @@ class CardStore {
   Future<LoyaltyCard> _updateMetadata(
     Directory directory,
     LoyaltyCard previous,
-    _CardFields fields,
-  ) async {
+    _CardFields fields, {
+    int? useCount,
+  }) async {
     final photoPath = previous.photoPath;
+    final count = useCount ?? previous.useCount;
     await _writeMetadata(
       directory,
       fields,
       photoPath == null ? null : _basename(photoPath),
+      useCount: count,
     );
-    return _toCard(previous.id, fields, photoPath);
+    return _toCard(previous.id, fields, photoPath, useCount: count);
   }
 
   Future<void> delete(LoyaltyCard card) => _run(() async {
@@ -271,7 +333,7 @@ class CardStore {
   });
 
   Future<bool> importForMerge(Uint8List bytes) => _run(() async {
-    if (bytes.length > _maxShareBytes) {
+    if (bytes.length > maxShareBytes) {
       throw const FormatException('This file is too large.');
     }
     final data = _decodeJson(bytes);
@@ -323,13 +385,11 @@ class CardStore {
   static String _mergeKey(String kind, String value) =>
       sha256.convert(utf8.encode('$kind:$value')).toString();
 
+  static _CardFields _fieldsOf(LoyaltyCard card) =>
+      (name: card.name, code: card.code, format: card.format, note: card.note);
+
   static Future<Map<String, Object?>> _encodeShare(LoyaltyCard card) async {
-    final data = _encodeFields((
-      name: card.name,
-      code: card.code,
-      format: card.format,
-      note: card.note,
-    ));
+    final data = _encodeFields(_fieldsOf(card));
     final photoPath = card.photoPath;
     if (photoPath != null) {
       final image = await _readPhoto(File(photoPath));
@@ -342,7 +402,7 @@ class CardStore {
   Future<LoyaltyCard> importCard(Stream<List<int>> source) => _run(() async {
     final fileBytes = BytesBuilder(copy: false);
     await for (final chunk in source) {
-      if (fileBytes.length + chunk.length > _maxShareBytes) {
+      if (fileBytes.length + chunk.length > maxShareBytes) {
         throw const FormatException('This file is too large.');
       }
       fileBytes.add(chunk);
@@ -411,10 +471,12 @@ class CardStore {
     final metadata = File(_join(directory, 'card.json'));
     final data = _decodeJson(await _readLimited(metadata, _maxMetadataBytes));
     final fields = _decodeFields(data);
+    final count = data['useCount'];
+    final useCount = count is int && count > 0 ? count : 0;
     final filename = data['photo'];
     if (filename == null && data.containsKey('photo')) {
       _requireCardContent(fields, hasPhoto: false);
-      return _toCard(id, fields, null);
+      return _toCard(id, fields, null, useCount: useCount);
     }
     if (filename is! String || !_photoName.hasMatch(filename)) {
       throw const FormatException('The stored card photo is invalid.');
@@ -423,7 +485,7 @@ class CardStore {
     if (!await photo.exists()) {
       throw const FormatException('The stored card photo is missing.');
     }
-    return _toCard(id, fields, photo.path);
+    return _toCard(id, fields, photo.path, useCount: useCount);
   }
 
   Future<File> _writePhoto(Directory directory, _CardImage image) async {
@@ -440,10 +502,12 @@ class CardStore {
   Future<void> _writeMetadata(
     Directory directory,
     _CardFields fields,
-    String? photoName,
-  ) => _writeAtomically(File(_join(directory, 'card.json')), {
+    String? photoName, {
+    int useCount = 0,
+  }) => _writeAtomically(File(_join(directory, 'card.json')), {
     ..._encodeFields(fields),
     'photo': photoName,
+    if (useCount > 0) 'useCount': useCount,
   });
 
   Future<void> _writeAtomically(File target, Map<String, Object?> data) async {
@@ -636,14 +700,16 @@ class CardStore {
   static LoyaltyCard _toCard(
     String id,
     _CardFields fields,
-    String? photoPath,
-  ) => LoyaltyCard(
+    String? photoPath, {
+    int useCount = 0,
+  }) => LoyaltyCard(
     id: id,
     name: fields.name,
     photoPath: photoPath,
     code: fields.code,
     format: fields.format,
     note: fields.note,
+    useCount: useCount,
   );
 
   String _randomHex() => List.generate(

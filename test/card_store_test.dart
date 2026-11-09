@@ -41,9 +41,87 @@ void main() {
     expect(restored.name, 'Corner Market');
     expect(restored.code, '0001234567895');
     expect(restored.format, CardCodeFormat.ean13);
+    expect(restored.useCount, 0);
     expect(restored.photoPath, endsWith('.png'));
     expect(await File(restored.photoPath!).readAsBytes(), _png);
   });
+
+  test('sorts by name by default and breaks usage ties by name', () async {
+    final zebra = await store.save(name: 'Zebra', photo: null, code: '1');
+    final alpha = await store.save(name: 'alpha', photo: null, code: '2');
+    final bakery = await store.save(name: 'Bakery', photo: null, code: '3');
+
+    await Future.wait([
+      store.recordUse(zebra),
+      store.recordUse(bakery),
+      store.recordUse(zebra),
+      store.recordUse(alpha),
+    ]);
+
+    final reopened = CardStore(wallet);
+    expect((await reopened.load()).map((card) => card.name), [
+      'alpha',
+      'Bakery',
+      'Zebra',
+    ]);
+    final mostUsed = await reopened.load(order: CardSortOrder.mostUsed);
+    expect(mostUsed.map((card) => card.name), ['Zebra', 'alpha', 'Bakery']);
+    expect(mostUsed.map((card) => card.useCount), [2, 1, 1]);
+  });
+
+  test('remembers the local sort preference across store instances', () async {
+    expect(await store.readSortOrder(), CardSortOrder.alphabetical);
+    await store.writeSortOrder(CardSortOrder.mostUsed);
+    final reopened = CardStore(wallet);
+    expect(await reopened.readSortOrder(), CardSortOrder.mostUsed);
+    await reopened.writeSortOrder(CardSortOrder.alphabetical);
+    expect(await CardStore(wallet).readSortOrder(), CardSortOrder.alphabetical);
+  });
+
+  test(
+    'keeps uses through edits and excludes them from both share formats',
+    () async {
+      final saved = await store.save(name: 'Market', photo: null, code: '0007');
+      await store.recordUse(saved);
+      final updated = await store.updateNote(saved, 'Use at checkout');
+      expect(updated.useCount, 1);
+      final edited = await store.save(
+        existing: saved,
+        name: 'Renamed market',
+        photo: original,
+        code: saved.code,
+      );
+      expect(edited.useCount, 1);
+      expect(edited.note, 'Use at checkout');
+
+      final other = CardStore(
+        Directory.fromUri(temporary.uri.resolve('other/')),
+      );
+      final shared = await store.exportCard(edited, temporary);
+      final fileData =
+          jsonDecode(await shared.readAsString()) as Map<String, Object?>;
+      expect(fileData, isNot(contains('useCount')));
+      final imported = await other.importCard(
+        Stream.value(utf8.encode(jsonEncode({...fileData, 'useCount': 99}))),
+      );
+      expect(imported.useCount, 0);
+
+      final nearby = CardStore(
+        Directory.fromUri(temporary.uri.resolve('nearby/')),
+      );
+      final bytes = (await store.exportForMerge(edited.id))!;
+      final mergeData = jsonDecode(utf8.decode(bytes)) as Map<String, Object?>;
+      expect(mergeData, isNot(contains('useCount')));
+      expect(
+        await nearby.importForMerge(
+          utf8.encode(jsonEncode({...mergeData, 'useCount': 99})),
+        ),
+        isTrue,
+      );
+      expect((await nearby.load()).single.useCount, 0);
+      expect((await store.load()).single.useCount, 1);
+    },
+  );
 
   test(
     'shares the original bytes and preserves significant code whitespace',

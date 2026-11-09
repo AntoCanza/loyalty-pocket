@@ -30,6 +30,8 @@
 	<string>Choose a photo of your loyalty card to save it in your wallet.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Find Loyalty Pocket devices on the same Wi-Fi network and merge selected wallets.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Use Bluetooth to merge missing loyalty cards with nearby devices in your sync group.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_loyaltypocket._tcp</string>
@@ -38,6 +40,11 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bluetooth_sync_channel">Nearby card sync</string>
+    <string name="bluetooth_sync_notification">Nearby card sync is enabled</string>
+</resources>

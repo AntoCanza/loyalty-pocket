@@ -1,3 +1,4 @@
 "NSCameraUsageDescription" = "Fotografa le tue carte fedeltà e scansiona i loro codici a barre.";
 "NSPhotoLibraryUsageDescription" = "Scegli una foto della carta fedeltà da salvare nel portafoglio.";
 "NSLocalNetworkUsageDescription" = "Trova i dispositivi Loyalty Pocket sulla stessa rete Wi-Fi e unisci i portafogli selezionati.";
+"NSBluetoothAlwaysUsageDescription" = "Usa Bluetooth per unire le carte fedeltà mancanti con i dispositivi vicini del tuo gruppo di sincronizzazione.";
